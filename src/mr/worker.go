@@ -158,6 +158,7 @@ func doReduce(reducef func(string, []string) string, filenames []string, jobNum 
 			}
 			kva = append(kva, kv)
 		}
+		file.Close()
 	}
 
 	sort.Slice(kva, func(i int, j int) bool {
