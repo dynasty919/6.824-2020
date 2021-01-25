@@ -34,7 +34,7 @@ type MyReply struct {
 	JobNum     int
 	InputPath  string
 	InterPaths []string
-	nReduce    int
+	NReduce    int
 }
 
 type MapDoneArgs struct {

@@ -8,7 +8,9 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -46,23 +48,20 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// uncomment to send the Example RPC to the master.
 	//CallExample()
-	args := MyArgs{}
-	reply := MyReply{
-		JobType:    "",
-		JobNum:     0,
-		InputPath:  "",
-		InterPaths: nil,
-		nReduce:    0,
-	}
 	for {
-		err := call("master.Scheduler", &args, &reply)
+		args := MyArgs{}
+		reply := MyReply{}
+		err := call("Master.Scheduler", &args, &reply)
 		if err != nil {
+			fmt.Println(err)
 			break
 		}
 
 		if reply.JobType == "map" {
-			doMap(mapf, reply.InputPath, reply.JobNum, reply.nReduce)
+			fmt.Println("doing map with", reply)
+			doMap(mapf, reply.InputPath, reply.JobNum, reply.NReduce)
 		} else if reply.JobType == "reduce" {
+			fmt.Println("doing reduce with", reply)
 			doReduce(reducef, reply.InterPaths, reply.JobNum)
 		} else {
 			time.Sleep(time.Second)
@@ -118,7 +117,7 @@ func doMap(mapf func(string, string) []KeyValue, filename string, jobNum int, nR
 		InterPath: interPath,
 	}
 	reply := MapDoneReply{}
-	err = call("master.MapTaskDone", &args, &reply)
+	err = call("Master.MapTaskDone", &args, &reply)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -133,8 +132,19 @@ func doReduce(reducef func(string, []string) string, filenames []string, jobNum 
 	}
 	defer out.Close()
 
+	var kva []KeyValue
 	for _, filename := range filenames {
-		var kva []KeyValue
+		list := strings.Split(filename, "-")
+		if len(list) != 3 {
+			log.Fatalln("wrong inter file name", filename)
+		}
+		num, err := strconv.Atoi(list[2])
+		if err != nil {
+			log.Fatalln(err)
+		}
+		if num != jobNum {
+			continue
+		}
 
 		file, err := os.Open(filename)
 		if err != nil {
@@ -148,24 +158,35 @@ func doReduce(reducef func(string, []string) string, filenames []string, jobNum 
 			}
 			kva = append(kva, kv)
 		}
+	}
 
-		i := 0
-		for i < len(kva) {
-			j := i + 1
-			for j < len(kva) && kva[j].Key == kva[i].Key {
-				j++
-			}
-			values := []string{}
-			for k := i; k < j; k++ {
-				values = append(values, kva[k].Value)
-			}
-			output := reducef(kva[i].Key, values)
+	sort.Slice(kva, func(i int, j int) bool {
+		return kva[i].Key < kva[j].Key
+	})
 
-			// this is the correct format for each line of Reduce output.
-			fmt.Fprintf(out, "%v %v\n", kva[i].Key, output)
-
-			i = j
+	i := 0
+	for i < len(kva) {
+		j := i + 1
+		for j < len(kva) && kva[j].Key == kva[i].Key {
+			j++
 		}
+		var values []string
+		for k := i; k < j; k++ {
+			values = append(values, kva[k].Value)
+		}
+		output := reducef(kva[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(out, "%v %v\n", kva[i].Key, output)
+
+		i = j
+	}
+
+	arg := ReduceDoneArgs{JobNum: jobNum}
+	reply := ReduceDoneReply{}
+	err = call("Master.ReduceTaskDone", &arg, &reply)
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 

@@ -2,6 +2,7 @@ package mr
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -57,12 +58,13 @@ type Master struct {
 //}
 
 func (m *Master) Scheduler(args *MyArgs, reply *MyReply) error {
+	fmt.Println("in scheduler")
 	for i, task := range m.mapTasks {
 		if task.State == idle {
 			reply.JobType = "map"
 			reply.InputPath = task.DataPath
 			reply.JobNum = i
-			reply.nReduce = m.nReduce
+			reply.NReduce = m.nReduce
 			task.State = inProgress
 			m.workerList = append(m.workerList, WorkerInfo{
 				JobType: "map",
@@ -71,20 +73,20 @@ func (m *Master) Scheduler(args *MyArgs, reply *MyReply) error {
 			return nil
 		}
 	}
-
+	fmt.Println("about to schedule reduce")
 	for i, task := range m.reduceTasks {
 		if task.State == idle {
 			reply.JobType = "reduce"
 			reply.InterPaths = task.DataPath
 			reply.JobNum = i
-			reply.nReduce = m.nReduce
+			reply.NReduce = m.nReduce
 			task.State = inProgress
 			m.workerList = append(m.workerList, WorkerInfo{
 				JobType: "reduce",
 				JobNum:  i,
 			})
+			return nil
 		}
-		return nil
 	}
 	if m.Done() {
 		return errors.New("out of jobs")
@@ -125,14 +127,17 @@ func (m *Master) server() {
 //
 func (m *Master) Done() bool {
 	ret := true
+	if len(m.mapTasks) == 0 || len(m.reduceTasks) == 0 {
+		return false
+	}
 
 	// Your code here.
 	for _, v := range m.mapTasks {
-		ret = ret || (v.State == completed)
+		ret = ret && (v.State == completed)
 	}
 
 	for _, v := range m.reduceTasks {
-		ret = ret || (v.State == completed)
+		ret = ret && (v.State == completed)
 	}
 
 	return ret
@@ -142,7 +147,7 @@ func (m *Master) MapDone() bool {
 	ret := true
 
 	for _, v := range m.mapTasks {
-		ret = ret || (v.State == completed)
+		ret = ret && (v.State == completed)
 	}
 	return ret
 }
@@ -156,6 +161,13 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{}
 
 	// Your code here.
+	go Run(&m, files, nReduce)
+
+	return &m
+}
+
+func Run(m *Master, files []string, nReduce int) {
+	fmt.Println(m.Done())
 	m.nMap = len(files)
 	m.mapTasks = make([]MapTask, m.nMap)
 	m.nReduce = nReduce
@@ -170,20 +182,19 @@ func MakeMaster(files []string, nReduce int) *Master {
 	}
 
 	m.server()
-
+	fmt.Println(m)
 	for !(m.MapDone()) {
 		time.Sleep(time.Second)
 	}
-
+	fmt.Println("map Done")
+	fmt.Println(m.mapTasks)
 	var intermediate []string
 	for _, task := range m.mapTasks {
 		intermediate = append(intermediate, task.InterPath...)
 	}
-
-	for _, task := range m.reduceTasks {
-		task.DataPath = intermediate
-		task.State = idle
+	for i, _ := range m.reduceTasks {
+		m.reduceTasks[i].DataPath = intermediate
+		m.reduceTasks[i].State = idle
 	}
-
-	return &m
+	fmt.Println(m.reduceTasks)
 }
