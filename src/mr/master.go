@@ -63,6 +63,9 @@ type Master struct {
 //	return nil
 //}
 
+//负责分发任务的调度器。这个吊玩意能称得上是调度器实在是让人笑掉大牙，他做的实际上就是反复的遍历m里面的mapTasks和reduceTasks
+//这两个数据结构，检查里面的任务的state，这种遍历的方法也就这种jobs数比较小所以没有太慢，正常来说应该用channel来做的，后面
+//考虑重新用channel做一遍
 func (m *Master) Scheduler(args *MyArgs, reply *MyReply) error {
 	fmt.Println("worker" + strconv.Itoa(args.WorkerNum) + "entering scheduler")
 	m.lock.Lock()
@@ -108,6 +111,8 @@ func (m *Master) Scheduler(args *MyArgs, reply *MyReply) error {
 	return nil
 }
 
+//负责map工作的worker完成工作后，调这个rpc函数来通知master工作完成，注意如果这个worker负责的工作已经完成了，就直接
+//返回，否则会重复执行m.mapWt.Done()
 func (m *Master) MapTaskDone(args *MapDoneArgs, reply *MapDoneReply) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -126,6 +131,8 @@ func (m *Master) MapTaskDone(args *MapDoneArgs, reply *MapDoneReply) error {
 	return nil
 }
 
+//负责reduce工作的worker完成工作后，调这个rpc函数来通知master工作完成，注意如果这个worker负责的工作已经完成了，就直接
+//返回，否则会重复执行m.reduceWt.Done()
 func (m *Master) ReduceTaskDone(args *ReduceDoneArgs, reply *ReduceDoneReply) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -163,28 +170,11 @@ func (m *Master) server() {
 // main/mrmaster.go calls Done() periodically to find out
 // if the entire job has finished.
 //
+//用reduce的wait group变量来控制全部任务是否结束，这个函数只能给外层的main.go来调，如果随便调的话
+//，因为我各种地方加了一堆锁，所以很有可能会死锁
 func (m *Master) Done() bool {
 	m.reduceWt.Wait()
 	return true
-	//ret := true
-	//
-	//m.lock.Lock()
-	//defer m.lock.Unlock()
-	//
-	//if len(m.mapTasks) == 0 || len(m.reduceTasks) == 0 {
-	//	ret = false
-	//}
-	//
-	//// Your code here.
-	//for _, v := range m.mapTasks {
-	//	ret = ret && (v.State == completed)
-	//}
-	//
-	//for _, v := range m.reduceTasks {
-	//	ret = ret && (v.State == completed)
-	//}
-	//
-	//return ret
 }
 
 //
@@ -192,6 +182,7 @@ func (m *Master) Done() bool {
 // main/mrmaster.go calls this function.
 // nReduce is the number of reduce tasks to use.
 //
+//主程序，先创建一个master， 加进map任务，然后就可以把master的指针返回去了，然后通过Run这个goroutine来跑流程
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{
 		nMap:        len(files),
@@ -217,6 +208,8 @@ func MakeMaster(files []string, nReduce int) *Master {
 	return &m
 }
 
+//先跑负责fault tolerance的WorkerWatcher，然后用m.mapWt这个wait group来控制流程，保证所有map job结束后才开始
+//分配reduce job，之后在m里加入reduce job
 func Run(m *Master, files []string, nReduce int) {
 
 	go WorkerWatcher(m)
@@ -238,7 +231,7 @@ func Run(m *Master, files []string, nReduce int) {
 	}
 }
 
-//WorkerWatcher
+//负责容错性，不停的从workerChan中拉出注册进来的worker，然后给它分配一个单独的看门狗
 func WorkerWatcher(m *Master) {
 	for {
 		select {
@@ -250,6 +243,7 @@ func WorkerWatcher(m *Master) {
 	}
 }
 
+//检查这个worker负责的job10秒钟之后是否完成，如果没完成就task状态改回idle
 func WatchDog(m *Master, worker WorkerInfo) {
 	time.Sleep(time.Second * 10)
 	m.lock.Lock()

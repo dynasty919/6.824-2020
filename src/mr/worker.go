@@ -42,6 +42,7 @@ func ihash(key string) int {
 //
 // main/mrworker.go calls this function.
 //
+//worker里不涉及很多并发，所以比较简明，就是不停的call master找任务，根据任务类型选择执行do map还是do reduce
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
@@ -75,6 +76,8 @@ func Worker(mapf func(string, string) []KeyValue,
 	return
 }
 
+//每个map job实际上要制造出nReduce个中间文件，中间文件的文件名是按照，mr-X-Y这种格式，X和Y分摩尔是map job和reduce job
+// 的序号，Y由上面那个ihash函数决定
 func doMap(mapf func(string, string) []KeyValue, filename string, jobNum int, nReduce int) {
 
 	fileList := make([]InterFileInfo, nReduce)
@@ -130,6 +133,9 @@ func doMap(mapf func(string, string) []KeyValue, filename string, jobNum int, nR
 
 }
 
+//reduce job需要收到了全部的intermediate files的路径，但是只选出和自己负责的那部分files来读入，也就是nMaps个文件，然后
+//执行reducef这个外部用户函数。这里面用了一个论文上说的技巧，就是先把输出文件做成一个temp file，最后全写完才改成最终合规的
+//文件名，老实说我想了半天也没想出这么做的目的是啥
 func doReduce(reducef func(string, []string) string, filenames []string, jobNum int) {
 
 	out, err := ioutil.TempFile("", "tmpFile****")
