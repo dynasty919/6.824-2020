@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -38,6 +39,7 @@ type WorkerInfo struct {
 
 type Master struct {
 	// Your definitions here.
+	lock        sync.Mutex
 	nMap        int
 	nReduce     int
 	mapTasks    []MapTask
@@ -58,6 +60,8 @@ type Master struct {
 //}
 
 func (m *Master) Scheduler(args *MyArgs, reply *MyReply) error {
+	m.lock.Lock()
+
 	fmt.Println("in scheduler")
 	for i, task := range m.mapTasks {
 		if task.State == idle {
@@ -65,14 +69,16 @@ func (m *Master) Scheduler(args *MyArgs, reply *MyReply) error {
 			reply.InputPath = task.DataPath
 			reply.JobNum = i
 			reply.NReduce = m.nReduce
-			task.State = inProgress
+			m.mapTasks[i].State = inProgress
 			m.workerList = append(m.workerList, WorkerInfo{
 				JobType: "map",
 				JobNum:  i,
 			})
+			m.lock.Unlock()
 			return nil
 		}
 	}
+
 	fmt.Println("about to schedule reduce")
 	for i, task := range m.reduceTasks {
 		if task.State == idle {
@@ -80,14 +86,16 @@ func (m *Master) Scheduler(args *MyArgs, reply *MyReply) error {
 			reply.InterPaths = task.DataPath
 			reply.JobNum = i
 			reply.NReduce = m.nReduce
-			task.State = inProgress
+			m.reduceTasks[i].State = inProgress
 			m.workerList = append(m.workerList, WorkerInfo{
 				JobType: "reduce",
 				JobNum:  i,
 			})
+			m.lock.Unlock()
 			return nil
 		}
 	}
+	m.lock.Unlock()
 	if m.Done() {
 		return errors.New("out of jobs")
 	}
@@ -95,12 +103,16 @@ func (m *Master) Scheduler(args *MyArgs, reply *MyReply) error {
 }
 
 func (m *Master) MapTaskDone(args *MapDoneArgs, reply *MapDoneReply) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	m.mapTasks[args.JobNum].State = completed
 	m.mapTasks[args.JobNum].InterPath = args.InterPath
 	return nil
 }
 
 func (m *Master) ReduceTaskDone(args *ReduceDoneArgs, reply *ReduceDoneReply) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	m.reduceTasks[args.JobNum].State = completed
 	return nil
 }
@@ -127,8 +139,12 @@ func (m *Master) server() {
 //
 func (m *Master) Done() bool {
 	ret := true
+
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
 	if len(m.mapTasks) == 0 || len(m.reduceTasks) == 0 {
-		return false
+		ret = false
 	}
 
 	// Your code here.
@@ -144,6 +160,9 @@ func (m *Master) Done() bool {
 }
 
 func (m *Master) MapDone() bool {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
 	ret := true
 
 	for _, v := range m.mapTasks {
@@ -162,12 +181,11 @@ func MakeMaster(files []string, nReduce int) *Master {
 
 	// Your code here.
 	go Run(&m, files, nReduce)
-
 	return &m
 }
 
 func Run(m *Master, files []string, nReduce int) {
-	fmt.Println(m.Done())
+	m.lock.Lock()
 	m.nMap = len(files)
 	m.mapTasks = make([]MapTask, m.nMap)
 	m.nReduce = nReduce
@@ -180,14 +198,19 @@ func Run(m *Master, files []string, nReduce int) {
 			InterPath: []string{},
 		}
 	}
+	m.lock.Unlock()
 
 	m.server()
-	fmt.Println(m)
+
 	for !(m.MapDone()) {
 		time.Sleep(time.Second)
 	}
+
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
 	fmt.Println("map Done")
-	fmt.Println(m.mapTasks)
+
 	var intermediate []string
 	for _, task := range m.mapTasks {
 		intermediate = append(intermediate, task.InterPath...)
@@ -196,5 +219,4 @@ func Run(m *Master, files []string, nReduce int) {
 		m.reduceTasks[i].DataPath = intermediate
 		m.reduceTasks[i].State = idle
 	}
-	fmt.Println(m.reduceTasks)
 }

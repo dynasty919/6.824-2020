@@ -67,7 +67,9 @@ func Worker(mapf func(string, string) []KeyValue,
 			time.Sleep(time.Second)
 			continue
 		}
+		time.Sleep(time.Second * 3)
 	}
+	fmt.Println("worker out, searching for another job")
 	return
 }
 
@@ -117,6 +119,7 @@ func doMap(mapf func(string, string) []KeyValue, filename string, jobNum int, nR
 		InterPath: interPath,
 	}
 	reply := MapDoneReply{}
+	fmt.Println("ready to call back to master")
 	err = call("Master.MapTaskDone", &args, &reply)
 	if err != nil {
 		log.Fatal(err)
