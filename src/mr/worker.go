@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/rpc"
 	"os"
 	"sort"
@@ -49,11 +50,12 @@ func Worker(mapf func(string, string) []KeyValue,
 	// uncomment to send the Example RPC to the master.
 	//CallExample()
 	for {
-		args := MyArgs{}
+		args := MyArgs{WorkerNum: rand.Intn(1000)}
 		reply := MyReply{}
+		fmt.Println("worker calling for a new job", args.WorkerNum)
 		err := call("Master.Scheduler", &args, &reply)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("master probably has exited", err)
 			break
 		}
 
@@ -67,7 +69,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			time.Sleep(time.Second)
 			continue
 		}
-		time.Sleep(time.Second * 3)
+		time.Sleep(time.Second)
 	}
 	fmt.Println("worker out, searching for another job")
 	return
@@ -97,6 +99,7 @@ func doMap(mapf func(string, string) []KeyValue, filename string, jobNum int, nR
 		log.Fatal()
 	}
 	defer file.Close()
+	fmt.Println("entering map function")
 	kva := mapf(filename, string(contents))
 	for _, kv := range kva {
 		err := fileList[ihash(kv.Key)%nReduce].encoder.Encode(&kv)
@@ -128,8 +131,9 @@ func doMap(mapf func(string, string) []KeyValue, filename string, jobNum int, nR
 }
 
 func doReduce(reducef func(string, []string) string, filenames []string, jobNum int) {
-	name := "mr-out-" + strconv.Itoa(jobNum)
-	out, err := os.Create(name)
+
+	out, err := ioutil.TempFile("", "tmpFile****")
+	//	out, err := os.Create(name)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -186,6 +190,9 @@ func doReduce(reducef func(string, []string) string, filenames []string, jobNum 
 		i = j
 	}
 
+	fmt.Println("changing name from" + out.Name() + "to" + strconv.Itoa(jobNum))
+	os.Rename(out.Name(), "mr-out-"+strconv.Itoa(jobNum))
+
 	arg := ReduceDoneArgs{JobNum: jobNum}
 	reply := ReduceDoneReply{}
 	err = call("Master.ReduceTaskDone", &arg, &reply)
@@ -228,6 +235,7 @@ func call(rpcname string, args interface{}, reply interface{}) error {
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)
+		fmt.Println("out of jobs")
 	}
 	defer c.Close()
 

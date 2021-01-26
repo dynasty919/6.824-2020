@@ -27,6 +27,7 @@ import (
 // Add your RPC definitions here.
 
 type MyArgs struct {
+	WorkerNum int
 }
 
 type MyReply struct {
