@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 //
@@ -67,10 +66,10 @@ func Worker(mapf func(string, string) []KeyValue,
 			fmt.Println("doing reduce with", reply)
 			doReduce(reducef, reply.InterPaths, reply.JobNum)
 		} else {
-			time.Sleep(time.Second)
+			//		time.Sleep(time.Second)
 			continue
 		}
-		time.Sleep(time.Second)
+		//	time.Sleep(time.Second)
 	}
 	fmt.Println("worker out, searching for another job")
 	return
