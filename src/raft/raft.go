@@ -212,7 +212,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			(args.LastLogTerm > rf.log[len(rf.log)-1].Term ||
 				(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
 					args.LastLogIndex >= len(rf.log)-1)) {
-			//TO DO ：重置election timer. 好像也不需要了
 			reply.Term = rf.currentTerm
 			reply.VoteGranted = true
 			rf.currentTerm = args.Term
@@ -429,6 +428,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
+//我定义了一大堆channel，然后select监听所有的channel，只要有相应的事件kick in就直接reap掉所有的现有goroutine（并且
+//指望它们能快点结束），然后开启新的工作goroutine。我感觉我做的可以说是非常丑陋了，我看了网上一个人的做法，他在Run中的select
+//之前先去检查rf的state，然后根据state来判定需要监听什么channel，感觉这样做优雅许多。
 func (rf *Raft) Run(applyCh chan ApplyMsg, me int, peers []*labrpc.ClientEnd) {
 	done := make(chan struct{})
 	go rf.Follower(done, me)
@@ -442,8 +444,6 @@ func (rf *Raft) Run(applyCh chan ApplyMsg, me int, peers []*labrpc.ClientEnd) {
 			go rf.Follower(done, me)
 		case <-rf.higherTermFromReply:
 			done <- struct{}{}
-			//			DPrintln("ending old goroutines because of higherTermFromReply in ", me)
-			//			DPrintln("server ", me, " pass a lock and about to enter follower goroutine")
 			go rf.Follower(done, me)
 		case <-rf.followerElectionTimeout:
 			done <- struct{}{}
