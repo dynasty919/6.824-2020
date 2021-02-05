@@ -237,8 +237,6 @@ func WorkerWatcher(m *Master) {
 		select {
 		case worker := <-m.workerChan:
 			go WatchDog(m, worker)
-		default:
-			continue
 		}
 	}
 }
