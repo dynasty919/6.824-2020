@@ -2,6 +2,8 @@ package raft
 
 import (
 	"log"
+	"math/rand"
+	"time"
 )
 
 // Debugging
@@ -19,4 +21,9 @@ func min(a int, b int) int {
 		return a
 	}
 	return b
+}
+
+func (rf *Raft) resetElectionTimer() {
+	t := 1000 + rand.Intn(1000)
+	rf.electionTimer = time.Duration(t) * time.Millisecond
 }

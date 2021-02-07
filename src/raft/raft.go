@@ -570,35 +570,12 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 	defer close(done2)
 
 	DPrintln("candidate ", me, " start to hold election")
-
-	rf.mu.Lock()
-	rf.currentTerm++
-	rf.votedFor = rf.me
-	rf.resetElectionTimer()
-	rf.state = candidate
-	t := rf.electionTimer
-
-	args := RequestVoteArgs{
-		Term:         rf.currentTerm,
-		CandidateId:  me,
-		LastLogIndex: len(rf.log) - 1,
-		LastLogTerm:  rf.log[len(rf.log)-1].Term,
-	}
-
-	curTerm := rf.currentTerm
-	DPrintln("candidate ", me, "have term of ", curTerm)
-	rf.mu.Unlock()
-
-	go rf.candidateElectionTimeoutChecker(done2, t, me)
-
 	grantedVote := make(chan struct{})
-	for i, peer := range peers {
-		if i != me {
-			go rf.callRequestVote(args, peer, done2, grantedVote, i)
-		}
-	}
-	DPrintln("candidate ", me, " is waiting for votes")
+
 	cnt := 1
+	var timeout time.Duration
+	var gap time.Duration
+
 	for !rf.killed() {
 		select {
 		case <-done:
@@ -612,9 +589,38 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 				//			DPrintln("candidate ", me, "have set election won kicker")
 				return
 			}
+		default:
+			if gap >= timeout {
+
+				rf.mu.Lock()
+				rf.votedFor = rf.me
+				rf.currentTerm++
+				rf.resetElectionTimer()
+				rf.state = candidate
+				timeout = rf.electionTimer
+
+				args := RequestVoteArgs{
+					Term:         rf.currentTerm,
+					CandidateId:  me,
+					LastLogIndex: len(rf.log) - 1,
+					LastLogTerm:  rf.log[len(rf.log)-1].Term,
+				}
+
+				curTerm := rf.currentTerm
+				DPrintln("candidate ", me, "have term of ", curTerm)
+				rf.mu.Unlock()
+
+				for i, peer := range peers {
+					if i != me {
+						go rf.callRequestVote(args, peer, done2, grantedVote, i)
+					}
+				}
+				gap = 0
+			}
+			time.Sleep(time.Millisecond * 20)
+			gap += time.Millisecond * 20
 		}
 	}
-
 }
 
 func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
@@ -653,22 +659,6 @@ func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
 		}
 	}
 
-}
-
-func (rf *Raft) candidateElectionTimeoutChecker(done chan struct{}, t time.Duration, me int) {
-	var gap time.Duration
-	for gap < t && !rf.killed() {
-		select {
-		case <-done:
-			DPrintln("candidate ", me, "'s election timeout checker with ", t, " turned off ")
-			return
-		default:
-			time.Sleep(time.Millisecond * 10)
-			gap += time.Millisecond * 10
-		}
-	}
-	DPrintln("candidate ", me, " election timeout with ", t)
-	rf.candidateElectionTimeout <- struct{}{}
 }
 
 func (rf *Raft) Follower(done chan struct{}, me int) {
@@ -711,9 +701,4 @@ func (rf *Raft) followElectionTimeoutChecker(done chan struct{}, t time.Duration
 	}
 	DPrintln("follower ", me, " election timeout with", t)
 	rf.followerElectionTimeout <- struct{}{}
-}
-
-func (rf *Raft) resetElectionTimer() {
-	t := 1000 + rand.Intn(1000)
-	rf.electionTimer = time.Duration(t) * time.Millisecond
 }
