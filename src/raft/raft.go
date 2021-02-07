@@ -82,8 +82,7 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	leader int
-	state  RaftState
+	state RaftState
 
 	currentTerm int
 	votedFor    int
@@ -258,7 +257,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.votedFor = -1
 		}
 		rf.state = follower
-		rf.leader = args.LeaderId
 		rf.newLeaderIncoming <- LeaderInfo{
 			term:     args.Term,
 			leaderId: args.LeaderId,
@@ -395,7 +393,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		persister: persister,
 		me:        me,
 
-		leader:      -1,
 		state:       follower,
 		currentTerm: 0,
 		votedFor:    -1,
@@ -438,8 +435,6 @@ func (rf *Raft) Run(applyCh chan ApplyMsg, me int, peers []*labrpc.ClientEnd) {
 		case <-rf.higherTermFromReply:
 			done <- struct{}{}
 			go rf.Follower(done, me, peers)
-		case <-rf.electionWon:
-			go rf.Leader(done, me, peers)
 		}
 	}
 }
@@ -466,31 +461,16 @@ func (rf *Raft) Leader(done chan struct{}, me int, peers []*labrpc.ClientEnd) {
 
 	rf.mu.Unlock()
 
-	go rf.heartbeatSender(peers, me, done2, heartbeat)
-
 	DPrintln("leader ", me, "running, but only sending heartbeat")
 	for !rf.killed() {
 		select {
 		case <-done:
 			DPrintln("leader ", me, "stepping down")
 			return
-		}
-	}
-}
-
-func (rf *Raft) heartbeatSender(peers []*labrpc.ClientEnd, me int, done chan struct{}, heartbeat time.Duration) {
-	done3 := make(chan struct{})
-	defer close(done3)
-
-	for !rf.killed() {
-		select {
-		case <-done:
-			DPrintln("leader ", me, "'s heartbeat sender is turned off")
-			return
 		default:
 			for i, v := range peers {
 				if i != me {
-					go rf.sendHeartBeatToPeer(v, me, i, done3)
+					go rf.sendHeartBeatToPeer(v, me, i, done2)
 				}
 			}
 			DPrintln("leader ", me, " sending heartbeat finished")
@@ -575,8 +555,7 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 			cnt++
 			if cnt >= len(peers)/2+1 {
 				DPrintln("candidate ", me, "have won election")
-				rf.electionWon <- struct{}{}
-				//			DPrintln("candidate ", me, "have set election won kicker")
+				rf.Leader(done, me, peers)
 				return
 			}
 		default:
