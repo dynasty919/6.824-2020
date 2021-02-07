@@ -434,10 +434,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 func (rf *Raft) Run(applyCh chan ApplyMsg, me int, peers []*labrpc.ClientEnd) {
 	done := make(chan struct{})
 	go rf.Follower(done, me)
-	for {
-		if rf.killed() {
-			return
-		}
+	for !rf.killed() {
 		select {
 		case <-rf.newLeaderIncoming:
 			done <- struct{}{}
@@ -482,10 +479,7 @@ func (rf *Raft) Leader(done chan struct{}, me int, peers []*labrpc.ClientEnd) {
 	go rf.heartbeatSender(peers, me, done2, heartbeat)
 
 	DPrintln("leader ", me, "running, but only sending heartbeat")
-	for {
-		if rf.killed() {
-			return
-		}
+	for !rf.killed() {
 		select {
 		case <-done:
 			DPrintln("leader ", me, "stepping down")
@@ -498,26 +492,7 @@ func (rf *Raft) heartbeatSender(peers []*labrpc.ClientEnd, me int, done chan str
 	done3 := make(chan struct{})
 	defer close(done3)
 
-	for {
-		if rf.killed() {
-			return
-		}
-		rf.mu.Lock()
-		argsList := make([]AppendEntriesArgs, len(peers))
-		for i := 0; i < len(argsList); i++ {
-			if i != me {
-				argsList[i] = AppendEntriesArgs{
-					Term:         rf.currentTerm,
-					LeaderId:     me,
-					PrevLogIndex: rf.nextIndex[i] - 1,
-					PrevLogTerm:  rf.log[rf.nextIndex[i]-1].Term,
-					Entries:      rf.log[rf.nextIndex[i]:],
-					LeaderCommit: rf.commitIndex,
-				}
-			}
-		}
-		rf.mu.Unlock()
-
+	for !rf.killed() {
 		select {
 		case <-done:
 			DPrintln("leader ", me, "'s heartbeat sender is turned off")
@@ -525,7 +500,7 @@ func (rf *Raft) heartbeatSender(peers []*labrpc.ClientEnd, me int, done chan str
 		default:
 			for i, v := range peers {
 				if i != me {
-					go rf.sendHeartBeatToPeer(v, me, i, done3, argsList[i])
+					go rf.sendHeartBeatToPeer(v, me, i, done3)
 				}
 			}
 			DPrintln("leader ", me, " sending heartbeat finished")
@@ -535,7 +510,18 @@ func (rf *Raft) heartbeatSender(peers []*labrpc.ClientEnd, me int, done chan str
 }
 
 func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
-	done chan struct{}, args AppendEntriesArgs) {
+	done chan struct{}) {
+
+	rf.mu.Lock()
+	args := AppendEntriesArgs{
+		Term:         rf.currentTerm,
+		LeaderId:     me,
+		PrevLogIndex: rf.nextIndex[peerId] - 1,
+		PrevLogTerm:  rf.log[rf.nextIndex[peerId]-1].Term,
+		Entries:      rf.log[rf.nextIndex[peerId]:],
+		LeaderCommit: rf.commitIndex,
+	}
+	rf.mu.Unlock()
 
 	reply := AppendEntriesReply{
 		Term:    0,
@@ -613,10 +599,7 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 	}
 	DPrintln("candidate ", me, " is waiting for votes")
 	cnt := 1
-	for {
-		if rf.killed() {
-			return
-		}
+	for !rf.killed() {
 		select {
 		case <-done:
 			DPrintln("candidate ", me, "turned off")
@@ -674,10 +657,7 @@ func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
 
 func (rf *Raft) candidateElectionTimeoutChecker(done chan struct{}, t time.Duration, me int) {
 	var gap time.Duration
-	for gap < t {
-		if rf.killed() {
-			return
-		}
+	for gap < t && !rf.killed() {
 		select {
 		case <-done:
 			DPrintln("candidate ", me, "'s election timeout checker with ", t, " turned off ")
@@ -706,10 +686,7 @@ func (rf *Raft) Follower(done chan struct{}, me int) {
 	rf.mu.Unlock()
 
 	go rf.followElectionTimeoutChecker(done2, t, me)
-	for {
-		if rf.killed() {
-			return
-		}
+	for !rf.killed() {
 		select {
 		case <-done:
 			DPrintln("follower ", me, " turned off")
@@ -722,10 +699,7 @@ func (rf *Raft) Follower(done chan struct{}, me int) {
 func (rf *Raft) followElectionTimeoutChecker(done chan struct{}, t time.Duration, me int) {
 	var gap time.Duration
 
-	for gap < t {
-		if rf.killed() {
-			return
-		}
+	for gap < t && !rf.killed() {
 		select {
 		case <-done:
 			DPrintln("follower ", me, "'s election timeout checker with ", t, " turned off ")
