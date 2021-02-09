@@ -51,7 +51,7 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 
 				for i, peer := range peers {
 					if i != me {
-						go rf.callRequestVote(args, peer, done2, grantedVote, i)
+						go rf.callRequestVote(args, peer, done2, grantedVote, i, me)
 					}
 				}
 				gap = 0
@@ -63,7 +63,7 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 }
 
 func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
-	done chan struct{}, grantedVote chan struct{}, peerId int) {
+	done chan struct{}, grantedVote chan struct{}, peerId int, me int) {
 	reply := RequestVoteReply{
 		Term:        0,
 		VoteGranted: false,
@@ -76,22 +76,40 @@ func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
 	default:
 		if !suc {
 			return
+		}
+
+		rf.mu.Lock()
+		state := rf.state
+		term := rf.currentTerm
+		if rf.currentTerm != args.Term {
+			DPrintln("candidate ", me, "'s request vote sent to ", peerId,
+				" had old term", args.Term, " but candidate now is ", state, " have term ", term)
+			return
+		}
+
+		if rf.state != candidate {
+			DPrintln("candidate ", me, "'s request vote sent to ", peerId,
+				" but candidate now is no longer candidate ,but is", state)
+			return
+		}
+		rf.mu.Unlock()
+
+		if reply.Term > args.Term {
+			rf.mu.Lock()
+			rf.currentTerm = reply.Term
+			rf.votedFor = -1
+			rf.state = follower
+			rf.newLeaderIncoming <- struct{}{}
+			rf.mu.Unlock()
+			return
 		} else {
-			if reply.Term > args.Term {
-				rf.mu.Lock()
-				rf.currentTerm = reply.Term
-				rf.votedFor = -1
-				rf.state = follower
-				rf.mu.Unlock()
-				rf.newLeaderIncoming <- struct{}{}
+			if reply.VoteGranted == true {
+				grantedVote <- struct{}{}
+				return
 			} else {
-				if reply.VoteGranted == true {
-					grantedVote <- struct{}{}
-					return
-				} else {
-					return
-				}
+				return
 			}
 		}
+
 	}
 }
