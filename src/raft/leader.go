@@ -103,14 +103,12 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 		LeaderId:     me,
 		PrevLogIndex: rf.nextIndex[peerId] - 1,
 		PrevLogTerm:  rf.log[rf.nextIndex[peerId]-1].Term,
-		Entries:      rf.log[rf.nextIndex[peerId]:],
+		Entries:      rf.getEntries(peerId),
 		LeaderCommit: rf.commitIndex,
 	}
-
-	lastSentIndex := len(rf.log) - 1
 	rf.mu.Unlock()
 
-	reply := AppendEntriesReply{
+	reply := &AppendEntriesReply{
 		Term:    0,
 		Success: false,
 	}
@@ -120,16 +118,17 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 	defer rf.mu.Unlock()
 
 	state := rf.state
+	term := rf.currentTerm
+	log := rf.log
 
 	select {
 	case <-done:
 		DPrintln("leader ", me, "'s heart beat sender to ", peerId, " is turned off", "leader now is ", state)
 		return
 	default:
-		term := rf.currentTerm
 		if !suc {
 			DPrintln("leader ", me, "'s heartbeat sender to ", peerId, " is unsuccessful",
-				"leader now is ", state, " have term ", term)
+				"leader now is ", state, " have term ", term, "have log ", log)
 			return
 		}
 
@@ -154,11 +153,10 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 			rf.votedFor = -1
 			rf.state = follower
 			rf.higherTermFromReply <- struct{}{}
-			//			DPrintln("leader ", me, " have sent NewTermInfo kick")
 		} else {
 			if reply.Success {
-				rf.nextIndex[peerId] = max(lastSentIndex+1, rf.nextIndex[peerId])
-				rf.matchIndex[peerId] = max(lastSentIndex, rf.matchIndex[peerId])
+				rf.nextIndex[peerId] = args.PrevLogIndex + len(args.Entries) + 1
+				rf.matchIndex[peerId] = args.PrevLogIndex + len(args.Entries)
 			} else {
 				rf.nextIndex[peerId]--
 			}

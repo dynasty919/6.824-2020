@@ -7,7 +7,7 @@ import (
 )
 
 // Debugging
-const Debug = 0
+const Debug = 1
 
 func DPrintln(a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -101,4 +101,11 @@ func (rf *Raft) receivedEntriesAlreadyExist(args *AppendEntriesArgs) bool {
 		}
 	}
 	return true
+}
+
+func (rf *Raft) getEntries(peerId int) []LogEntry {
+	nextIndex := rf.nextIndex[peerId]
+	entries := make([]LogEntry, len(rf.log)-nextIndex)
+	copy(entries, rf.log[nextIndex:])
+	return entries
 }

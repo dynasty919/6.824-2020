@@ -78,29 +78,29 @@ func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
 			return
 		}
 
-		rf.mu.Lock()
-		state := rf.state
-		term := rf.currentTerm
-		if rf.currentTerm != args.Term {
-			DPrintln("candidate ", me, "'s request vote sent to ", peerId,
-				" had old term", args.Term, " but candidate now is ", state, " have term ", term)
-			return
-		}
-
-		if rf.state != candidate {
-			DPrintln("candidate ", me, "'s request vote sent to ", peerId,
-				" but candidate now is no longer candidate ,but is", state)
-			return
-		}
-		rf.mu.Unlock()
+		//rf.mu.Lock()
+		//state := rf.state
+		//term := rf.currentTerm
+		//if rf.currentTerm != args.Term {
+		//	DPrintln("candidate ", me, "'s request vote sent to ", peerId,
+		//		" had old term", args.Term, " but candidate now is ", state, " have term ", term)
+		//	return
+		//}
+		//
+		//if rf.state != candidate {
+		//	DPrintln("candidate ", me, "'s request vote sent to ", peerId,
+		//		" but candidate now is no longer candidate ,but is", state)
+		//	return
+		//}
+		//rf.mu.Unlock()
 
 		if reply.Term > args.Term {
 			rf.mu.Lock()
 			rf.currentTerm = reply.Term
 			rf.votedFor = -1
 			rf.state = follower
-			rf.newLeaderIncoming <- struct{}{}
 			rf.mu.Unlock()
+			rf.newLeaderIncoming <- struct{}{}
 			return
 		} else {
 			if reply.VoteGranted == true {
@@ -110,6 +110,5 @@ func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
 				return
 			}
 		}
-
 	}
 }

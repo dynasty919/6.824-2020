@@ -242,6 +242,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			reply.Success = true
 			if args.LeaderCommit > rf.commitIndex {
 				rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
+
+				log := rf.log
+				commitIndex := rf.commitIndex
+				DPrintln("server ", me, " already have attempted log, now los is", log, " commitIndex is ", commitIndex)
 				rf.applyLogKicker <- struct{}{}
 			}
 			return
@@ -258,12 +262,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = rf.currentTerm
 		reply.Success = true
 
-		log := rf.log
-		commitIndex := rf.commitIndex
-		DPrintln("server ", me, " has appended log, now los is", log, " commitIndex is ", commitIndex)
-
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
+
+			log := rf.log
+			commitIndex := rf.commitIndex
+			DPrintln("server ", me, " has appended log, now los is", log, " commitIndex is ", commitIndex)
 			rf.applyLogKicker <- struct{}{}
 		}
 		return
