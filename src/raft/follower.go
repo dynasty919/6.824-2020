@@ -10,12 +10,11 @@ func (rf *Raft) Follower(done chan struct{}, me int, peers []*labrpc.ClientEnd) 
 	rf.mu.Lock()
 	rf.resetElectionTimer()
 	t := rf.electionTimer
-	DPrintln("follower ", me, " following, have a election timeout of", t)
 	rf.state = follower
 
 	curTerm := rf.currentTerm
 	votedFor := rf.votedFor
-	DPrintln("follower ", me, "have term of ", curTerm, " voted for ", votedFor)
+	DPrintln("follower ", me, "have term of ", curTerm, " voted for ", votedFor, "election timeout", t)
 	rf.mu.Unlock()
 
 	var gap time.Duration
@@ -23,7 +22,7 @@ func (rf *Raft) Follower(done chan struct{}, me int, peers []*labrpc.ClientEnd) 
 	for !rf.killed() {
 		select {
 		case <-done:
-			DPrintln("follower ", me, " turned off")
+			//			DPrintln("follower ", me, " turned off")
 			return
 		default:
 			time.Sleep(time.Millisecond * 10)

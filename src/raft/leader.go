@@ -23,13 +23,14 @@ func (rf *Raft) Leader(done chan struct{}, me int, peers []*labrpc.ClientEnd) {
 
 	curTerm := rf.currentTerm
 	votedFor := rf.votedFor
-	DPrintln("leader ", me, "have term of ", curTerm, " voted for ", votedFor)
+	entry := rf.log
+	DPrintln("leader ", me, "have term of ", curTerm, " voted for ", votedFor, "has log ", entry)
 
 	rf.mu.Unlock()
 
 	go rf.commitIndexChecker(done2, me, peers)
 
-	DPrintln("leader ", me, "running, but only sending heartbeat")
+	//	DPrintln("leader ", me, "running, but only sending heartbeat")
 	for !rf.killed() {
 		select {
 		case <-done:
@@ -41,7 +42,7 @@ func (rf *Raft) Leader(done chan struct{}, me int, peers []*labrpc.ClientEnd) {
 					go rf.sendHeartBeatToPeer(v, me, i, done2)
 				}
 			}
-			DPrintln("leader ", me, " sending heartbeat finished")
+			//			DPrintln("leader ", me, " sending heartbeat finished")
 			time.Sleep(heartbeat)
 		}
 	}
@@ -81,6 +82,9 @@ func (rf *Raft) commitIndexChecker(done chan struct{}, me int, peers []*labrpc.C
 				}
 			}
 			if kickApplyFlag {
+				log := rf.log
+				commitIndex := rf.commitIndex
+				DPrintln("leader ", me, "commit to commitIndex", commitIndex, "now have log ", log)
 				rf.applyLogKicker <- struct{}{}
 			}
 			rf.mu.Unlock()
@@ -122,14 +126,27 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 		DPrintln("leader ", me, "'s heart beat sender to ", peerId, " is turned off", "leader now is ", state)
 		return
 	default:
+		term := rf.currentTerm
 		if !suc {
-			DPrintln("leader ", me, "'s heartbeat sender to ", peerId, " is unsuccessful", "leader now is ", state)
+			DPrintln("leader ", me, "'s heartbeat sender to ", peerId, " is unsuccessful",
+				"leader now is ", state, " have term ", term)
 			return
 		}
-		DPrintln("leader ", me, "'s heart beat sender to ", peerId, " have finished sending", "leader now is ", state)
+
+		if term != args.Term {
+			DPrintln("leader ", me, "'s heart beat sender to ", peerId,
+				" had old term", args.Term, " but leader now is ", state, " have term ", term)
+			return
+		}
+
 		if rf.state != leader {
+			DPrintln("leader ", me, "'s request vote sent to ", peerId,
+				" but leader now is no longer leader ,but is", state)
 			return
 		}
+
+		DPrintln("leader ", me, "'s heart beat sender to ", peerId,
+			" have finished sending", "leader now is ", state, " have term ", term)
 
 		if reply.Term > args.Term {
 			DPrintln("leader ", me, " receive bigger term from ", peerId, " of term ", reply.Term)
@@ -137,7 +154,7 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 			rf.votedFor = -1
 			rf.state = follower
 			rf.higherTermFromReply <- struct{}{}
-			DPrintln("leader ", me, " have sent NewTermInfo kick")
+			//			DPrintln("leader ", me, " have sent NewTermInfo kick")
 		} else {
 			if reply.Success {
 				rf.nextIndex[peerId] = max(lastSentIndex+1, rf.nextIndex[peerId])

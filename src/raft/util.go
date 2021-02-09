@@ -7,7 +7,7 @@ import (
 )
 
 // Debugging
-const Debug = 1
+const Debug = 0
 
 func DPrintln(a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -71,7 +71,7 @@ func (rf *Raft) resetElectionTimer() {
 	rf.electionTimer = time.Duration(t) * time.Millisecond
 }
 
-func (rf *Raft) applyLog(appliedLog []LogEntry, startIndex int) {
+func (rf *Raft) applyLog(appliedLog []LogEntry, startIndex int, me int) {
 	go func() {
 		for _, entry := range appliedLog {
 			rf.applyChan <- ApplyMsg{
@@ -81,6 +81,12 @@ func (rf *Raft) applyLog(appliedLog []LogEntry, startIndex int) {
 			}
 			startIndex++
 		}
+		rf.mu.Lock()
+		log := rf.log
+		rf.lastApplied = rf.commitIndex
+		lastApplied := rf.lastApplied
+		rf.mu.Unlock()
+		DPrintln("server ", me, "applied a bunch of log, now have log of", log, "lastApplied is", lastApplied)
 	}()
 }
 

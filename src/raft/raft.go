@@ -162,12 +162,22 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
 	} else if args.Term > rf.currentTerm {
-		reply.Term = rf.currentTerm
-		reply.VoteGranted = true
-		rf.currentTerm = args.Term
-		rf.votedFor = args.CandidateId
-		rf.state = follower
-		rf.newLeaderIncoming <- struct{}{}
+		if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
+			(args.LastLogTerm > rf.log[len(rf.log)-1].Term ||
+				(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
+					args.LastLogIndex >= len(rf.log)-1)) {
+			reply.Term = rf.currentTerm
+			reply.VoteGranted = true
+			rf.currentTerm = args.Term
+			rf.votedFor = args.CandidateId
+			rf.state = follower
+			rf.newLeaderIncoming <- struct{}{}
+		} else {
+			rf.currentTerm = args.Term
+			rf.votedFor = -1
+			rf.state = follower
+			rf.newLeaderIncoming <- struct{}{}
+		}
 	} else {
 		if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
 			(args.LastLogTerm > rf.log[len(rf.log)-1].Term ||
@@ -191,7 +201,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	me := rf.me
 	term := rf.currentTerm
+	id := args.LeaderId
+	command := args.Entries
+	preLogIndex := args.PrevLogIndex
+	preLogTerm := args.PrevLogTerm
+	leaderCommit := args.LeaderCommit
 	DPrintln("server ", me, " of term ", term, " receive heartbeat from server", args.LeaderId, " with term ", args.Term)
+	DPrintln("server ", me, "receive append attempt from server ", id, " of command ", command)
+	DPrintln("attempt has preLogIndex ", preLogIndex, " preLogTerm", preLogTerm, " leaderCommit", leaderCommit)
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.Success = false
@@ -213,6 +230,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
+	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.Term = rf.currentTerm
+		reply.Success = false
+		return
+	}
+
 	if args.PrevLogIndex < lastOldEntryIndex {
 		if rf.receivedEntriesAlreadyExist(args) {
 			reply.Term = rf.currentTerm
@@ -225,6 +248,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		} else {
 			rf.log = rf.log[:args.PrevLogIndex+1]
 			lastOldEntryIndex = len(rf.log) - 1
+			entry := rf.log
+			DPrintln("server ", me, " truncate its log, now log is", entry)
 		}
 	}
 
@@ -232,6 +257,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.log = append(rf.log, args.Entries...)
 		reply.Term = rf.currentTerm
 		reply.Success = true
+
+		log := rf.log
+		commitIndex := rf.commitIndex
+		DPrintln("server ", me, " has appended log, now los is", log, " commitIndex is ", commitIndex)
+
 		if args.LeaderCommit > rf.commitIndex {
 			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
 			rf.applyLogKicker <- struct{}{}
@@ -307,22 +337,24 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	me := rf.me
+	DPrintln("!!!!!!!")
+
 	if rf.state != leader || rf.killed() {
+		DPrintln("server ", me, "fail to receive the command", command, " because it is killed or not leader")
 		return 0, 0, false
 	}
+
+	DPrintln("client send to leader ", me, "command", command)
 
 	rf.log = append(rf.log, LogEntry{
 		Entry: command,
 		Term:  rf.currentTerm,
 	})
-	rf.lastApplied++
 
-	index = rf.lastApplied
+	index = len(rf.log) - 1
 	term = rf.currentTerm
 	isLeader = true
-
-	me := rf.me
-	DPrintln("leader ", me, " receive ", command, " from client")
 
 	return index, term, isLeader
 }
@@ -371,8 +403,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		currentTerm: 0,
 		votedFor:    -1,
 		log: []LogEntry{{
-			Entry: "",
-			Term:  -1,
+			Entry: 0,
+			Term:  0,
 		}},
 		commitIndex:         0,
 		lastApplied:         0,
@@ -401,6 +433,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
 	done := make(chan struct{})
 	go rf.Follower(done, me, peers)
+	go rf.logApplyKicker(me)
 
 	for !rf.killed() {
 		select {
@@ -414,7 +447,7 @@ func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
 	}
 }
 
-func (rf *Raft) logApplyKicker() {
+func (rf *Raft) logApplyKicker(me int) {
 	for !rf.killed() {
 		<-rf.applyLogKicker
 		rf.mu.Lock()
@@ -423,9 +456,14 @@ func (rf *Raft) logApplyKicker() {
 			copy(appliedLog, rf.log[rf.lastApplied+1:rf.commitIndex+1])
 
 			me := rf.me
-			DPrintln("server ", me, "applying log ", appliedLog)
+			commitIndex := rf.commitIndex
+			lastApplied := rf.lastApplied
+			log := rf.log
+			DPrintln("server ", me, "applying log ", appliedLog, "has commitIndex ",
+				commitIndex, " lastApplied ", lastApplied, "now log is ", log)
 
-			rf.applyLog(appliedLog, rf.commitIndex)
+			rf.applyLog(appliedLog, rf.lastApplied+1, me)
+
 		}
 		rf.mu.Unlock()
 	}
