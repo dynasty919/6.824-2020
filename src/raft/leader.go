@@ -147,7 +147,7 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 		DPrintln("leader ", me, "'s heart beat sender to ", peerId,
 			" have finished sending", "leader now is ", state, " have term ", term)
 
-		if reply.Term > args.Term {
+		if reply.Term > term {
 			DPrintln("leader ", me, " receive bigger term from ", peerId, " of term ", reply.Term)
 			rf.currentTerm = reply.Term
 			rf.votedFor = -1

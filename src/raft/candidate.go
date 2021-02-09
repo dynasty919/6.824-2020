@@ -17,7 +17,6 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 	cnt := 1
 
 	for !rf.killed() {
-
 		select {
 		case <-done:
 			DPrintln("candidate ", me, "turned off")
@@ -80,23 +79,24 @@ func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
 			return
 		}
 
-		//rf.mu.Lock()
-		//state := rf.state
-		//term := rf.currentTerm
-		//if rf.currentTerm != args.Term {
-		//	DPrintln("candidate ", me, "'s request vote sent to ", peerId,
-		//		" had old term", args.Term, " but candidate now is ", state, " have term ", term)
-		//	return
-		//}
-		//
-		//if rf.state != candidate {
-		//	DPrintln("candidate ", me, "'s request vote sent to ", peerId,
-		//		" but candidate now is no longer candidate ,but is", state)
-		//	return
-		//}
-		//rf.mu.Unlock()
+		rf.mu.Lock()
+		state := rf.state
+		term := rf.currentTerm
+		rf.mu.Unlock()
 
-		if reply.Term > args.Term {
+		if term != args.Term {
+			DPrintln("candidate ", me, "'s request vote sent to ", peerId,
+				" had old term", args.Term, " but candidate now is ", state, " have term ", term)
+			return
+		}
+
+		if state != candidate {
+			DPrintln("candidate ", me, "'s request vote sent to ", peerId,
+				" but candidate now is no longer candidate ,but is", state)
+			return
+		}
+
+		if reply.Term > term {
 			rf.mu.Lock()
 			rf.currentTerm = reply.Term
 			rf.votedFor = -1
