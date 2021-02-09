@@ -9,56 +9,49 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 	done2 := make(chan struct{})
 	defer close(done2)
 
-	DPrintln("candidate ", me, " start to hold election")
+	rf.mu.Lock()
+	rf.currentTerm++
+	rf.votedFor = me
+	rf.resetElectionTimer()
+	rf.state = candidate
+
+	term := rf.currentTerm
+	args := RequestVoteArgs{
+		Term:         rf.currentTerm,
+		CandidateId:  me,
+		LastLogIndex: len(rf.log) - 1,
+		LastLogTerm:  rf.log[len(rf.log)-1].Term,
+	}
+	timeout := rf.electionTimer
+	rf.mu.Unlock()
+
+	DPrintln("candidate ", me, " start to hold election , has term ", term)
+
+	cnt := 1
 	grantedVote := make(chan struct{})
 
-	var timeout time.Duration
-	var gap time.Duration
-	cnt := 1
+	for i, peer := range peers {
+		if i != me {
+			go rf.callRequestVote(args, peer, done2, grantedVote, i, me)
+		}
+	}
 
 	for !rf.killed() {
 		select {
 		case <-done:
-			DPrintln("candidate ", me, "turned off")
+			DPrintln("candidate ", me, " turned off")
 			return
 		case <-grantedVote:
 			cnt++
 			if cnt >= len(peers)/2+1 {
-				DPrintln("candidate ", me, "have won election")
+				DPrintln("candidate ", me, " has won election")
 				go rf.Leader(done, me, peers)
 				return
 			}
-		default:
-			if gap >= timeout {
-				cnt = 1
-				gap = 0
-
-				rf.mu.Lock()
-				rf.votedFor = rf.me
-				rf.currentTerm++
-				rf.resetElectionTimer()
-				rf.state = candidate
-				timeout = rf.electionTimer
-
-				args := RequestVoteArgs{
-					Term:         rf.currentTerm,
-					CandidateId:  me,
-					LastLogIndex: len(rf.log) - 1,
-					LastLogTerm:  rf.log[len(rf.log)-1].Term,
-				}
-
-				curTerm := rf.currentTerm
-				DPrintln("candidate ", me, "have term of ", curTerm)
-				rf.mu.Unlock()
-
-				for i, peer := range peers {
-					if i != me {
-						go rf.callRequestVote(args, peer, done2, grantedVote, i, me)
-					}
-				}
-			}
-			time.Sleep(time.Millisecond * 20)
-			gap += time.Millisecond * 20
+		case <-time.After(timeout):
+			go rf.Candidate(done, me, peers)
+			DPrintln("candidate ", me, " election timeout")
+			return
 		}
 	}
 }
