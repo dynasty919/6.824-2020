@@ -12,11 +12,12 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 	DPrintln("candidate ", me, " start to hold election")
 	grantedVote := make(chan struct{})
 
-	cnt := 1
 	var timeout time.Duration
 	var gap time.Duration
+	cnt := 1
 
 	for !rf.killed() {
+
 		select {
 		case <-done:
 			DPrintln("candidate ", me, "turned off")
@@ -30,6 +31,8 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 			}
 		default:
 			if gap >= timeout {
+				cnt = 1
+				gap = 0
 
 				rf.mu.Lock()
 				rf.votedFor = rf.me
@@ -54,7 +57,6 @@ func (rf *Raft) Candidate(done chan struct{}, me int, peers []*labrpc.ClientEnd)
 						go rf.callRequestVote(args, peer, done2, grantedVote, i, me)
 					}
 				}
-				gap = 0
 			}
 			time.Sleep(time.Millisecond * 20)
 			gap += time.Millisecond * 20
