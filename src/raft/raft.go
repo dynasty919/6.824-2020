@@ -168,15 +168,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 					args.LastLogIndex >= len(rf.log)-1)) {
 			reply.Term = rf.currentTerm
 			reply.VoteGranted = true
-			rf.currentTerm = args.Term
-			rf.votedFor = args.CandidateId
-			rf.state = follower
-			rf.newLeaderIncoming <- struct{}{}
+			rf.beFollower(args.Term, args.CandidateId)
 		} else {
-			rf.currentTerm = args.Term
-			rf.votedFor = -1
-			rf.state = follower
-			rf.newLeaderIncoming <- struct{}{}
+			rf.beFollower(args.Term, -1)
 		}
 	} else {
 		if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
@@ -185,10 +179,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 					args.LastLogIndex >= len(rf.log)-1)) {
 			reply.Term = rf.currentTerm
 			reply.VoteGranted = true
-			rf.currentTerm = args.Term
-			rf.votedFor = args.CandidateId
-			rf.state = follower
-			rf.newLeaderIncoming <- struct{}{}
+			rf.beFollower(args.Term, args.CandidateId)
 		} else {
 			reply.Term = rf.currentTerm
 			reply.VoteGranted = false
@@ -214,13 +205,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		return
 	} else if args.Term > rf.currentTerm {
-		rf.currentTerm = args.Term
-		rf.votedFor = -1
-		rf.state = follower
-		rf.newLeaderIncoming <- struct{}{}
+		rf.beFollower(args.Term, -1)
 	} else {
-		rf.state = follower
-		rf.newLeaderIncoming <- struct{}{}
+		rf.beFollower(rf.currentTerm, rf.votedFor)
 	}
 
 	lastOldEntryIndex := len(rf.log) - 1
@@ -467,7 +454,6 @@ func (rf *Raft) logApplyKicker(me int) {
 				commitIndex, " lastApplied ", lastApplied, "now log is ", log)
 
 			rf.applyLog(appliedLog, rf.lastApplied+1, me)
-
 		}
 		rf.mu.Unlock()
 	}

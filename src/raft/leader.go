@@ -149,10 +149,7 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 
 		if reply.Term > term {
 			DPrintln("leader ", me, " receive bigger term from ", peerId, " of term ", reply.Term)
-			rf.currentTerm = reply.Term
-			rf.votedFor = -1
-			rf.state = follower
-			rf.higherTermFromReply <- struct{}{}
+			rf.beFollower(reply.Term, -1)
 		} else {
 			if reply.Success {
 				rf.nextIndex[peerId] = args.PrevLogIndex + len(args.Entries) + 1

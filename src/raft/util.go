@@ -7,7 +7,7 @@ import (
 )
 
 // Debugging
-const Debug = 1
+const Debug = 0
 
 func DPrintln(a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -108,4 +108,11 @@ func (rf *Raft) getEntries(peerId int) []LogEntry {
 	entries := make([]LogEntry, len(rf.log)-nextIndex)
 	copy(entries, rf.log[nextIndex:])
 	return entries
+}
+
+func (rf *Raft) beFollower(term int, voteFor int) {
+	rf.currentTerm = term
+	rf.votedFor = voteFor
+	rf.state = follower
+	rf.newLeaderIncoming <- struct{}{}
 }
