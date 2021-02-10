@@ -42,7 +42,7 @@ func (rf *Raft) Leader(done chan struct{}, me int, peers []*labrpc.ClientEnd) {
 					go rf.sendHeartBeatToPeer(v, me, i, done2)
 				}
 			}
-			//			DPrintln("leader ", me, " sending heartbeat finished")
+			//DPrintln("leader ", me, " sending heartbeat finished heartbeat term ", )
 			time.Sleep(heartbeat)
 		}
 	}
@@ -98,6 +98,10 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 	done chan struct{}) {
 
 	rf.mu.Lock()
+	if rf.state != leader {
+		rf.mu.Unlock()
+		return
+	}
 	args := AppendEntriesArgs{
 		Term:         rf.currentTerm,
 		LeaderId:     me,
@@ -112,7 +116,9 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 		Term:    0,
 		Success: false,
 	}
+
 	suc := peer.Call("Raft.AppendEntries", &args, &reply)
+	DPrintln("leader ", me, " sending heartbeat to server ", peerId, " finished heartbeat term ", args.Term)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -150,6 +156,7 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 		if reply.Term > term {
 			DPrintln("leader ", me, " receive bigger term from ", peerId, " of term ", reply.Term)
 			rf.beFollower(reply.Term, -1)
+			return
 		} else {
 			if reply.Success {
 				rf.nextIndex[peerId] = args.PrevLogIndex + len(args.Entries) + 1

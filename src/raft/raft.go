@@ -197,9 +197,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	preLogIndex := args.PrevLogIndex
 	preLogTerm := args.PrevLogTerm
 	leaderCommit := args.LeaderCommit
-	DPrintln("server ", me, " of term ", term, " receive heartbeat from server", args.LeaderId, " with term ", args.Term)
-	DPrintln("server ", me, "receive append attempt from server ", id, " of command ", command)
-	DPrintln("attempt has preLogIndex ", preLogIndex, " preLogTerm", preLogTerm, " leaderCommit", leaderCommit)
+	DPrintln("server ", me, " of term ", term, " receive heartbeat from server",
+		args.LeaderId, " with term ", args.Term,
+		"server ", me, "receive append attempt from server ", id, " of command ", command,
+		"attempt has preLogIndex ", preLogIndex, " preLogTerm", preLogTerm, " leaderCommit", leaderCommit)
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.Success = false

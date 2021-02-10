@@ -62,6 +62,7 @@ func (rf *Raft) callRequestVote(args RequestVoteArgs, peer *labrpc.ClientEnd,
 		Term:        0,
 		VoteGranted: false,
 	}
+
 	suc := peer.Call("Raft.RequestVote", &args, &reply)
 
 	select {
