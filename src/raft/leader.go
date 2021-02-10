@@ -5,28 +5,9 @@ import (
 	"time"
 )
 
-func (rf *Raft) Leader(done chan struct{}, me int, peers []*labrpc.ClientEnd) {
+func (rf *Raft) Leader(me int, peers []*labrpc.ClientEnd) {
 	done2 := make(chan struct{})
 	defer close(done2)
-
-	rf.mu.Lock()
-	rf.state = leader
-	heartbeat := rf.heartBeatTimer
-	rf.nextIndex = make([]int, len(peers))
-	for i := 0; i < len(rf.nextIndex); i++ {
-		rf.nextIndex[i] = len(rf.log)
-	}
-	rf.matchIndex = make([]int, len(peers))
-	for i := 0; i < len(rf.matchIndex); i++ {
-		rf.matchIndex[i] = 0
-	}
-
-	curTerm := rf.currentTerm
-	votedFor := rf.votedFor
-	entry := rf.log
-	DPrintln("leader ", me, "have term of ", curTerm, " voted for ", votedFor, "has log ", entry)
-
-	rf.mu.Unlock()
 
 	go rf.commitIndexChecker(done2, me, peers)
 

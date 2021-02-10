@@ -7,7 +7,7 @@ import (
 )
 
 // Debugging
-const Debug = 1
+const Debug = 0
 
 func DPrintln(a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -18,13 +18,6 @@ func DPrintln(a ...interface{}) (n int, err error) {
 
 func min(a int, b int) int {
 	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a int, b int) int {
-	if a > b {
 		return a
 	}
 	return b
@@ -67,8 +60,7 @@ type RequestVoteReply struct {
 }
 
 func (rf *Raft) resetElectionTimer() {
-	t := 300 + rand.Intn(100)
-	rf.electionTimer = time.Duration(t) * time.Millisecond
+	rf.electionTimeout = time.Duration(300+rand.Intn(200)) * time.Millisecond
 }
 
 func (rf *Raft) applyLog(appliedLog []LogEntry, startIndex int, me int) {
@@ -110,9 +102,34 @@ func (rf *Raft) getEntries(peerId int) []LogEntry {
 	return entries
 }
 
-func (rf *Raft) beFollower(term int, voteFor int) {
+func (rf *Raft) turnFollower(term int, voteFor int) {
 	rf.currentTerm = term
 	rf.votedFor = voteFor
 	rf.state = follower
-	rf.newLeaderIncoming <- struct{}{}
+	rf.resetElectionTimer()
+}
+
+func (rf *Raft) turnLeader(me int, peersNum int) {
+	rf.state = leader
+	rf.resetElectionTimer()
+	rf.nextIndex = make([]int, peersNum)
+	for i := 0; i < len(rf.nextIndex); i++ {
+		rf.nextIndex[i] = len(rf.log)
+	}
+	rf.matchIndex = make([]int, peersNum)
+	for i := 0; i < len(rf.matchIndex); i++ {
+		rf.matchIndex[i] = 0
+	}
+
+	curTerm := rf.currentTerm
+	votedFor := rf.votedFor
+	entry := rf.log
+	DPrintln("new elected leader ", me, "have term of ", curTerm, " voted for ", votedFor, "has log ", entry)
+}
+
+func (rf *Raft) turnCandidate(me int) {
+	rf.currentTerm++
+	rf.votedFor = me
+	rf.resetElectionTimer()
+	rf.state = candidate
 }

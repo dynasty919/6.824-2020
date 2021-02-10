@@ -20,6 +20,7 @@ package raft
 import (
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,13 +86,13 @@ type Raft struct {
 	nextIndex  []int
 	matchIndex []int
 
-	electionTimer  time.Duration
-	heartBeatTimer time.Duration
+	electionTimeout time.Duration
+	heartBeatTimer  time.Duration
 
-	newLeaderIncoming   chan struct{}
-	higherTermFromReply chan struct{}
-	applyLogKicker      chan struct{}
-	applyChan           chan ApplyMsg
+	followerKicker chan struct{}
+	applyLogKicker chan struct{}
+	leaderKicker   chan struct{}
+	applyChan      chan ApplyMsg
 }
 
 // return currentTerm and whether this server
@@ -147,124 +148,6 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
-}
-
-//
-// example RequestVote RPC handler.
-//
-func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (2A, 2B).
-
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	if args.Term < rf.currentTerm {
-		reply.Term = rf.currentTerm
-		reply.VoteGranted = false
-	} else if args.Term > rf.currentTerm {
-		if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
-			(args.LastLogTerm > rf.log[len(rf.log)-1].Term ||
-				(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
-					args.LastLogIndex >= len(rf.log)-1)) {
-			reply.Term = rf.currentTerm
-			reply.VoteGranted = true
-			rf.beFollower(args.Term, args.CandidateId)
-		} else {
-			rf.beFollower(args.Term, -1)
-		}
-	} else {
-		if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
-			(args.LastLogTerm > rf.log[len(rf.log)-1].Term ||
-				(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
-					args.LastLogIndex >= len(rf.log)-1)) {
-			reply.Term = rf.currentTerm
-			reply.VoteGranted = true
-			rf.beFollower(args.Term, args.CandidateId)
-		} else {
-			reply.Term = rf.currentTerm
-			reply.VoteGranted = false
-		}
-	}
-}
-
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	me := rf.me
-	term := rf.currentTerm
-	id := args.LeaderId
-	command := args.Entries
-	preLogIndex := args.PrevLogIndex
-	preLogTerm := args.PrevLogTerm
-	leaderCommit := args.LeaderCommit
-	DPrintln("server ", me, " of term ", term, " receive heartbeat from server",
-		args.LeaderId, " with term ", args.Term,
-		"server ", me, "receive append attempt from server ", id, " of command ", command,
-		"attempt has preLogIndex ", preLogIndex, " preLogTerm", preLogTerm, " leaderCommit", leaderCommit)
-	if args.Term < rf.currentTerm {
-		reply.Term = rf.currentTerm
-		reply.Success = false
-		return
-	} else if args.Term > rf.currentTerm {
-		rf.beFollower(args.Term, -1)
-	} else {
-		rf.beFollower(rf.currentTerm, rf.votedFor)
-	}
-
-	lastOldEntryIndex := len(rf.log) - 1
-	if args.PrevLogIndex > lastOldEntryIndex {
-		reply.Term = rf.currentTerm
-		reply.Success = false
-		return
-	}
-
-	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-		reply.Term = rf.currentTerm
-		reply.Success = false
-		return
-	}
-
-	if args.PrevLogIndex < lastOldEntryIndex {
-		if rf.receivedEntriesAlreadyExist(args) {
-			reply.Term = rf.currentTerm
-			reply.Success = true
-			if args.LeaderCommit > rf.commitIndex {
-				rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
-
-				log := rf.log
-				commitIndex := rf.commitIndex
-				DPrintln("server ", me, " already have attempted log, now los is", log, " commitIndex is ", commitIndex)
-				rf.applyLogKicker <- struct{}{}
-			}
-			return
-		} else {
-			rf.log = rf.log[:args.PrevLogIndex+1]
-			lastOldEntryIndex = len(rf.log) - 1
-			entry := rf.log
-			DPrintln("server ", me, " truncate its log, now log is", entry)
-		}
-	}
-
-	if args.PrevLogTerm == rf.log[lastOldEntryIndex].Term {
-		rf.log = append(rf.log, args.Entries...)
-		reply.Term = rf.currentTerm
-		reply.Success = true
-
-		if args.LeaderCommit > rf.commitIndex {
-			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
-
-			log := rf.log
-			commitIndex := rf.commitIndex
-			DPrintln("server ", me, " has appended log, now los is", log, " commitIndex is ", commitIndex)
-			rf.applyLogKicker <- struct{}{}
-		}
-		return
-	} else {
-		rf.log = rf.log[:len(rf.log)-1]
-		reply.Term = rf.currentTerm
-		reply.Success = false
-		return
-	}
 }
 
 //
@@ -398,13 +281,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			Entry: 0,
 			Term:  0,
 		}},
-		commitIndex:         0,
-		lastApplied:         0,
-		heartBeatTimer:      time.Millisecond * 100,
-		newLeaderIncoming:   make(chan struct{}),
-		higherTermFromReply: make(chan struct{}),
-		applyLogKicker:      make(chan struct{}),
-		applyChan:           applyCh,
+		commitIndex:    0,
+		lastApplied:    0,
+		heartBeatTimer: time.Millisecond * 100,
+		followerKicker: make(chan struct{}),
+		applyLogKicker: make(chan struct{}),
+		leaderKicker:   make(chan struct{}),
+		applyChan:      applyCh,
 	}
 
 	// Your initialization code here (2A, 2B, 2C).
@@ -423,18 +306,47 @@ func Make(peers []*labrpc.ClientEnd, me int,
 //指望它们能快点结束），然后开启新的工作goroutine。我感觉我做的可以说是非常丑陋了，我看了网上一个人的做法，他在Run中的select
 //之前先去检查rf的state，然后根据state来判定需要监听什么channel，感觉这样做优雅许多。
 func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
-	done := make(chan struct{})
-	go rf.Follower(done, me, peers)
 	go rf.logApplyKicker(me)
 
 	for !rf.killed() {
-		select {
-		case <-rf.newLeaderIncoming:
-			done <- struct{}{}
-			go rf.Follower(done, me, peers)
-		case <-rf.higherTermFromReply:
-			done <- struct{}{}
-			go rf.Follower(done, me, peers)
+
+		rf.mu.Lock()
+		state := rf.state
+		rf.resetElectionTimer()
+		heartBeat := rf.heartBeatTimer
+		electionTimeout := rf.electionTimeout
+		rf.mu.Unlock()
+
+		switch state {
+		case follower:
+			select {
+			case <-rf.followerKicker:
+				continue
+			case <-time.After(electionTimeout):
+				select {
+				case <-rf.followerKicker:
+					continue
+				default:
+					rf.mu.Lock()
+					rf.turnCandidate(me)
+					rf.mu.Unlock()
+					rf.Candidate(me, peers)
+				}
+			}
+		case candidate:
+			select {
+			case <-rf.followerKicker:
+				continue
+			case <-rf.leaderKicker:
+				continue
+			case <-time.After(electionTimeout):
+				rf.Candidate(me, peers)
+			}
+		case leader:
+			rf.Leader(me, peers)
+			<-time.After(heartBeat)
+		default:
+			panic("unknown state" + strconv.Itoa(int(state)))
 		}
 	}
 }
