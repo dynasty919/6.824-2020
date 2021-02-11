@@ -89,10 +89,10 @@ type Raft struct {
 	electionTimeout time.Duration
 	heartBeatTimer  time.Duration
 
-	followerKicker chan struct{}
-	applyLogKicker chan struct{}
-	leaderKicker   chan struct{}
-	applyChan      chan ApplyMsg
+	appendLogCh chan struct{}
+	voteCh      chan struct{}
+	applyChan   chan ApplyMsg
+	killChan    chan struct{}
 }
 
 // return currentTerm and whether this server
@@ -249,6 +249,7 @@ func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
 	fmt.Println("test is killing server")
+	rf.chSender(rf.killChan)
 }
 
 func (rf *Raft) killed() bool {
@@ -284,9 +285,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		commitIndex:    0,
 		lastApplied:    0,
 		heartBeatTimer: time.Millisecond * 100,
-		followerKicker: make(chan struct{}),
-		applyLogKicker: make(chan struct{}),
-		leaderKicker:   make(chan struct{}),
+		appendLogCh:    make(chan struct{}),
+		voteCh:         make(chan struct{}),
+		killChan:       make(chan struct{}),
 		applyChan:      applyCh,
 	}
 
@@ -302,29 +303,36 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	return rf
 }
 
-//我定义了几个channel，然后select监听所有的channel，只要有相应的事件kick in就直接reap掉所有的现有goroutine（并且
-//指望它们能快点结束），然后开启新的工作goroutine。我感觉我做的可以说是非常丑陋了，我看了网上一个人的做法，他在Run中的select
-//之前先去检查rf的state，然后根据state来判定需要监听什么channel，感觉这样做优雅许多。
 func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
-	go rf.logApplyKicker(me)
+	rf.resetElectionTimer()
+	//	go rf.logApplyKicker(me)
 
 	for !rf.killed() {
 
+		select {
+		case <-rf.killChan:
+			return
+		default:
+		}
+
 		rf.mu.Lock()
 		state := rf.state
-		rf.resetElectionTimer()
 		heartBeat := rf.heartBeatTimer
 		electionTimeout := rf.electionTimeout
 		rf.mu.Unlock()
 
 		switch state {
-		case follower:
+		case follower, candidate:
 			select {
-			case <-rf.followerKicker:
+			case <-rf.appendLogCh:
+				continue
+			case <-rf.voteCh:
 				continue
 			case <-time.After(electionTimeout):
 				select {
-				case <-rf.followerKicker:
+				case <-rf.appendLogCh:
+					continue
+				case <-rf.voteCh:
 					continue
 				default:
 					rf.mu.Lock()
@@ -333,41 +341,11 @@ func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
 					rf.Candidate(me, peers)
 				}
 			}
-		case candidate:
-			select {
-			case <-rf.followerKicker:
-				continue
-			case <-rf.leaderKicker:
-				continue
-			case <-time.After(electionTimeout):
-				rf.Candidate(me, peers)
-			}
 		case leader:
 			rf.Leader(me, peers)
-			<-time.After(heartBeat)
+			time.Sleep(heartBeat)
 		default:
 			panic("unknown state" + strconv.Itoa(int(state)))
 		}
-	}
-}
-
-func (rf *Raft) logApplyKicker(me int) {
-	for !rf.killed() {
-		<-rf.applyLogKicker
-		rf.mu.Lock()
-		if rf.commitIndex > rf.lastApplied {
-			appliedLog := make([]LogEntry, rf.commitIndex-rf.lastApplied)
-			copy(appliedLog, rf.log[rf.lastApplied+1:rf.commitIndex+1])
-
-			me := rf.me
-			commitIndex := rf.commitIndex
-			lastApplied := rf.lastApplied
-			log := rf.log
-			DPrintln("server ", me, "applying log ", appliedLog, "has commitIndex ",
-				commitIndex, " lastApplied ", lastApplied, "now log is ", log)
-
-			rf.applyLog(appliedLog, rf.lastApplied+1, me)
-		}
-		rf.mu.Unlock()
 	}
 }

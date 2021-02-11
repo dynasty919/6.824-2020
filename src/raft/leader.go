@@ -2,87 +2,26 @@ package raft
 
 import (
 	"6.824/src/labrpc"
-	"time"
+	"sort"
 )
 
 func (rf *Raft) Leader(me int, peers []*labrpc.ClientEnd) {
-	done2 := make(chan struct{})
-	defer close(done2)
 
-	go rf.commitIndexChecker(done2, me, peers)
-
-	//	DPrintln("leader ", me, "running, but only sending heartbeat")
-	for !rf.killed() {
-		select {
-		case <-done:
-			DPrintln("leader ", me, "stepping down")
-			return
-		default:
-			for i, v := range peers {
-				if i != me {
-					go rf.sendHeartBeatToPeer(v, me, i, done2)
-				}
-			}
-			//DPrintln("leader ", me, " sending heartbeat finished heartbeat term ", )
-			time.Sleep(heartbeat)
+	for i, v := range peers {
+		if i != me {
+			go rf.sendHeartBeatToPeer(v, me, i)
 		}
 	}
 }
 
-func (rf *Raft) commitIndexChecker(done chan struct{}, me int, peers []*labrpc.ClientEnd) {
-	rf.mu.Lock()
-	n := rf.commitIndex + 1
-	heartbeat := rf.heartBeatTimer
-	rf.mu.Unlock()
-
-	for !rf.killed() {
-		select {
-		case <-done:
-			return
-		default:
-			rf.mu.Lock()
-			kickApplyFlag := false
-			for n < len(rf.log) && rf.log[n].Term != rf.currentTerm {
-				n++
-			}
-			for {
-				cnt := 1
-				for peerId, peerMatchIndex := range rf.matchIndex {
-					if peerId != me {
-						if peerMatchIndex >= n {
-							cnt++
-						}
-					}
-				}
-				if cnt >= len(peers)/2+1 {
-					rf.commitIndex = n
-					kickApplyFlag = true
-					n++
-				} else {
-					break
-				}
-			}
-			if kickApplyFlag {
-				log := rf.log
-				commitIndex := rf.commitIndex
-				DPrintln("leader ", me, "commit to commitIndex", commitIndex, "now have log ", log)
-				rf.applyLogKicker <- struct{}{}
-			}
-			rf.mu.Unlock()
-
-			time.Sleep(heartbeat)
-		}
-	}
-}
-
-func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
-	done chan struct{}) {
+func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int) {
 
 	rf.mu.Lock()
 	if rf.state != leader {
 		rf.mu.Unlock()
 		return
 	}
+
 	args := AppendEntriesArgs{
 		Term:         rf.currentTerm,
 		LeaderId:     me,
@@ -93,58 +32,61 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int,
 	}
 	rf.mu.Unlock()
 
-	reply := &AppendEntriesReply{
-		Term:    0,
-		Success: false,
-	}
+	reply := &AppendEntriesReply{}
 
 	suc := peer.Call("Raft.AppendEntries", &args, &reply)
-	DPrintln("leader ", me, " sending heartbeat to server ", peerId, " finished heartbeat term ", args.Term)
 
+	if !suc {
+		DPrintln("leader ", me, "'s heartbeat sender to ", peerId, " is unsuccessful")
+		return
+	}
+	DPrintln("leader ", me, " sending heartbeat to server ", peerId, " succeed heartbeat term ", args.Term)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
 	state := rf.state
 	term := rf.currentTerm
-	log := rf.log
 
-	select {
-	case <-done:
-		DPrintln("leader ", me, "'s heart beat sender to ", peerId, " is turned off", "leader now is ", state)
-		return
-	default:
-		if !suc {
-			DPrintln("leader ", me, "'s heartbeat sender to ", peerId, " is unsuccessful",
-				"leader now is ", state, " have term ", term, "have log ", log)
-			return
-		}
-
-		if term != args.Term {
-			DPrintln("leader ", me, "'s heart beat sender to ", peerId,
-				" had old term", args.Term, " but leader now is ", state, " have term ", term)
-			return
-		}
-
-		if rf.state != leader {
-			DPrintln("leader ", me, "'s request vote sent to ", peerId,
-				" but leader now is no longer leader ,but is", state)
-			return
-		}
-
+	if term != args.Term {
 		DPrintln("leader ", me, "'s heart beat sender to ", peerId,
-			" have finished sending", "leader now is ", state, " have term ", term)
+			" had old term", args.Term, " but leader now is ", state, " have term ", term)
+		return
+	}
 
-		if reply.Term > term {
-			DPrintln("leader ", me, " receive bigger term from ", peerId, " of term ", reply.Term)
-			rf.beFollower(reply.Term, -1)
-			return
+	if rf.state != leader {
+		DPrintln("leader ", me, "'s request vote sent to ", peerId,
+			" but leader now is no longer leader ,but is", state)
+		return
+	}
+
+	//DPrintln("leader ", me, "'s heart beat sender to ", peerId,
+	//	" have finished sending", "leader now is ", state, " have term ", term)
+
+	if reply.Term > term {
+		DPrintln("leader ", me, " receive bigger term from ", peerId, " of term ", reply.Term)
+		rf.turnFollower(reply.Term, -1)
+		return
+	} else {
+		if reply.Success {
+			rf.nextIndex[peerId] = args.PrevLogIndex + len(args.Entries) + 1
+			rf.matchIndex[peerId] = args.PrevLogIndex + len(args.Entries)
+			rf.updateCommitIndex(me)
 		} else {
-			if reply.Success {
-				rf.nextIndex[peerId] = args.PrevLogIndex + len(args.Entries) + 1
-				rf.matchIndex[peerId] = args.PrevLogIndex + len(args.Entries)
-			} else {
-				rf.nextIndex[peerId]--
-			}
+			rf.nextIndex[peerId]--
 		}
+	}
+}
+
+func (rf *Raft) updateCommitIndex(me int) {
+	rf.matchIndex[rf.me] = len(rf.log) - 1
+	copyMatchIndex := make([]int, len(rf.matchIndex))
+	copy(copyMatchIndex, rf.matchIndex)
+	sort.Slice(copyMatchIndex, func(i int, j int) bool {
+		return copyMatchIndex[i] < copyMatchIndex[j]
+	})
+	N := copyMatchIndex[len(copyMatchIndex)/2]
+	if N > rf.commitIndex && rf.log[N].Term == rf.currentTerm {
+		rf.commitIndex = N
+		rf.updateLastApplied()
 	}
 }

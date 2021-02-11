@@ -63,23 +63,17 @@ func (rf *Raft) resetElectionTimer() {
 	rf.electionTimeout = time.Duration(300+rand.Intn(200)) * time.Millisecond
 }
 
-func (rf *Raft) applyLog(appliedLog []LogEntry, startIndex int, me int) {
-	go func() {
-		for _, entry := range appliedLog {
-			rf.applyChan <- ApplyMsg{
-				CommandValid: true,
-				Command:      entry.Entry,
-				CommandIndex: startIndex,
-			}
-			startIndex++
+func (rf *Raft) updateLastApplied() {
+	for rf.lastApplied < rf.commitIndex {
+		rf.lastApplied++
+		curLog := rf.log[rf.lastApplied]
+		applyMsg := ApplyMsg{
+			true,
+			curLog.Entry,
+			rf.lastApplied,
 		}
-		rf.mu.Lock()
-		log := rf.log
-		rf.lastApplied = rf.commitIndex
-		lastApplied := rf.lastApplied
-		rf.mu.Unlock()
-		DPrintln("server ", me, "applied a bunch of log, now have log of", log, "lastApplied is", lastApplied)
-	}()
+		rf.applyChan <- applyMsg
+	}
 }
 
 func (rf *Raft) receivedEntriesAlreadyExist(args *AppendEntriesArgs) bool {
@@ -97,8 +91,7 @@ func (rf *Raft) receivedEntriesAlreadyExist(args *AppendEntriesArgs) bool {
 
 func (rf *Raft) getEntries(peerId int) []LogEntry {
 	nextIndex := rf.nextIndex[peerId]
-	entries := make([]LogEntry, len(rf.log)-nextIndex)
-	copy(entries, rf.log[nextIndex:])
+	entries := append([]LogEntry{}, rf.log[nextIndex:]...)
 	return entries
 }
 
@@ -110,6 +103,9 @@ func (rf *Raft) turnFollower(term int, voteFor int) {
 }
 
 func (rf *Raft) turnLeader(me int, peersNum int) {
+	if rf.state != candidate {
+		return
+	}
 	rf.state = leader
 	rf.resetElectionTimer()
 	rf.nextIndex = make([]int, peersNum)
@@ -132,4 +128,17 @@ func (rf *Raft) turnCandidate(me int) {
 	rf.votedFor = me
 	rf.resetElectionTimer()
 	rf.state = candidate
+}
+
+func (rf *Raft) chSender(ch chan struct{}) {
+	go func() {
+		for {
+			select {
+			case <-ch: //if already set, consume it then resent to avoid block
+			default:
+				ch <- struct{}{}
+				return
+			}
+		}
+	}()
 }

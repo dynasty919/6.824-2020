@@ -8,39 +8,33 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
-	if args.Term < rf.currentTerm {
-		reply.Term = rf.currentTerm
-		reply.VoteGranted = false
-	} else if args.Term > rf.currentTerm {
-		if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
-			(args.LastLogTerm > rf.log[len(rf.log)-1].Term ||
-				(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
-					args.LastLogIndex >= len(rf.log)-1)) {
-			reply.Term = rf.currentTerm
-			reply.VoteGranted = true
-			rf.beFollower(args.Term, args.CandidateId)
-		} else {
-			rf.beFollower(args.Term, -1)
-		}
+	if args.Term > rf.currentTerm { //all server rule 1 If RPC request or response contains term T > currentTerm:
+		rf.turnFollower(args.Term, -1) // set currentTerm = T, convert to follower (§5.1)
+	}
+	reply.Term = rf.currentTerm
+	reply.VoteGranted = false
+	if (args.Term < rf.currentTerm) || (rf.votedFor != -1 && rf.votedFor != args.CandidateId) {
+		// Reply false if term < currentTerm (§5.1)  If votedFor is not null and not candidateId,
+	} else if args.LastLogTerm < rf.log[len(rf.log)-1].Term ||
+		(args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex < len(rf.log)-1) {
+		//If the logs have last entries with different terms, then the log with the later term is more up-to-date.
+		// If the logs end with the same term, then whichever log is longer is more up-to-date.
+		// Reply false if candidate’s log is at least as up-to-date as receiver’s log
 	} else {
-		if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
-			(args.LastLogTerm > rf.log[len(rf.log)-1].Term ||
-				(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
-					args.LastLogIndex >= len(rf.log)-1)) {
-			reply.Term = rf.currentTerm
-			reply.VoteGranted = true
-			rf.beFollower(args.Term, args.CandidateId)
-		} else {
-			reply.Term = rf.currentTerm
-			reply.VoteGranted = false
-		}
+		//grant vote
+		rf.votedFor = args.CandidateId
+		reply.VoteGranted = true
+		rf.state = follower
+		rf.chSender(rf.voteCh) //because If election timeout elapses without receiving granting vote to candidate, so wake up
 	}
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	defer rf.chSender(rf.appendLogCh)
+
 	me := rf.me
 	term := rf.currentTerm
 	id := args.LeaderId
@@ -52,68 +46,45 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		args.LeaderId, " with term ", args.Term,
 		"server ", me, "receive append attempt from server ", id, " of command ", command,
 		"attempt has preLogIndex ", preLogIndex, " preLogTerm", preLogTerm, " leaderCommit", leaderCommit)
+
+	reply.Term = rf.currentTerm
+	reply.Success = false
+
 	if args.Term < rf.currentTerm {
-		reply.Term = rf.currentTerm
-		reply.Success = false
 		return
-	} else if args.Term > rf.currentTerm {
-		rf.beFollower(args.Term, -1)
-	} else {
-		rf.beFollower(rf.currentTerm, rf.votedFor)
 	}
 
 	lastOldEntryIndex := len(rf.log) - 1
+
 	if args.PrevLogIndex > lastOldEntryIndex {
-		reply.Term = rf.currentTerm
-		reply.Success = false
 		return
 	}
-
 	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-		reply.Term = rf.currentTerm
-		reply.Success = false
 		return
 	}
 
-	if args.PrevLogIndex < lastOldEntryIndex {
-		if rf.receivedEntriesAlreadyExist(args) {
-			reply.Term = rf.currentTerm
-			reply.Success = true
-			if args.LeaderCommit > rf.commitIndex {
-				rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
-
-				log := rf.log
-				commitIndex := rf.commitIndex
-				DPrintln("server ", me, " already have attempted log, now los is", log, " commitIndex is ", commitIndex)
-				rf.applyLogKicker <- struct{}{}
-			}
-			return
-		} else {
-			rf.log = rf.log[:args.PrevLogIndex+1]
-			lastOldEntryIndex = len(rf.log) - 1
-			entry := rf.log
-			DPrintln("server ", me, " truncate its log, now log is", entry)
+	index := args.PrevLogIndex
+	for i := 0; i < len(args.Entries); i++ {
+		index++
+		if index >= len(rf.log) {
+			rf.log = append(rf.log, args.Entries[i:]...)
+			break
+		}
+		if rf.log[index].Term != args.Entries[i].Term {
+			rf.log = rf.log[:index]
+			rf.log = append(rf.log, args.Entries[i:]...)
+			break
 		}
 	}
 
-	if args.PrevLogTerm == rf.log[lastOldEntryIndex].Term {
-		rf.log = append(rf.log, args.Entries...)
-		reply.Term = rf.currentTerm
-		reply.Success = true
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
 
-		if args.LeaderCommit > rf.commitIndex {
-			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
-
-			log := rf.log
-			commitIndex := rf.commitIndex
-			DPrintln("server ", me, " has appended log, now los is", log, " commitIndex is ", commitIndex)
-			rf.applyLogKicker <- struct{}{}
-		}
-		return
-	} else {
-		rf.log = rf.log[:len(rf.log)-1]
-		reply.Term = rf.currentTerm
-		reply.Success = false
-		return
+		log := rf.log
+		commitIndex := rf.commitIndex
+		DPrintln("server ", me, " already have attempted log, now los is", log, " commitIndex is ", commitIndex)
+		rf.updateLastApplied()
 	}
+	reply.Success = true
+	return
 }

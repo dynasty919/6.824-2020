@@ -2,15 +2,10 @@ package raft
 
 import (
 	"6.824/src/labrpc"
-	"time"
 )
 
 func (rf *Raft) Candidate(me int, peers []*labrpc.ClientEnd) {
-	done := make(chan struct{})
-	defer close(done)
-
 	rf.mu.Lock()
-
 	term := rf.currentTerm
 	args := RequestVoteArgs{
 		Term:         rf.currentTerm,
@@ -33,7 +28,6 @@ func (rf *Raft) Candidate(me int, peers []*labrpc.ClientEnd) {
 			reply := &RequestVoteReply{}
 			suc := peer.Call("Raft.RequestVote", &args, &reply)
 			if !suc {
-				time.Sleep(time.Millisecond * 10)
 				return
 			}
 
@@ -62,7 +56,7 @@ func (rf *Raft) Candidate(me int, peers []*labrpc.ClientEnd) {
 					cnt++
 					if cnt == len(peers)/2+1 {
 						rf.turnLeader(me, len(peers))
-						rf.leaderKicker <- struct{}{}
+						rf.chSender(rf.voteCh)
 					}
 				}
 			}
