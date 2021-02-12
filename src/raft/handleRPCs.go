@@ -92,7 +92,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 		log := rf.log
 		commitIndex := rf.commitIndex
-		DPrintln("server ", me, " already have attempted log, now los is", log, " commitIndex is ", commitIndex)
+		DPrintln("server ", me, " have updated commitIndex, now log is", log, " commitIndex is ", commitIndex)
 		rf.updateLastApplied()
 	}
 	reply.Success = true
