@@ -25,6 +25,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.votedFor = args.CandidateId
 		reply.VoteGranted = true
 		rf.state = follower
+		rf.persist()
 		rf.chSender(rf.voteCh) //because If election timeout elapses without receiving granting vote to candidate, so wake up
 	}
 }
@@ -57,9 +58,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	lastOldEntryIndex := len(rf.log) - 1
 
 	if args.PrevLogIndex > lastOldEntryIndex {
+		//这种情况下类似于[4],[4,6,6,6],follower在prevLogIndex的位置上没有条目
+		//我们就直接返回follower的后的条目index
+		reply.FirstIndexOfLastLogTerm = lastOldEntryIndex
+		reply.LastLogTerm = -1
 		return
 	}
 	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		//[4,5,5],[4,6,6,6]和[4,4,4],[4,6,6,6]的情况
+		reply.LastLogTerm = rf.log[args.PrevLogIndex].Term
+		reply.FirstIndexOfLastLogTerm = rf.SearchFirstIndexOfTerm(rf.log[args.PrevLogIndex].Term)
 		return
 	}
 
@@ -68,11 +76,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		index++
 		if index >= len(rf.log) {
 			rf.log = append(rf.log, args.Entries[i:]...)
+			rf.persist()
 			break
 		}
 		if rf.log[index].Term != args.Entries[i].Term {
 			rf.log = rf.log[:index]
 			rf.log = append(rf.log, args.Entries[i:]...)
+			rf.persist()
 			break
 		}
 	}

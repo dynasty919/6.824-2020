@@ -72,7 +72,19 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int) 
 			rf.matchIndex[peerId] = args.PrevLogIndex + len(args.Entries)
 			rf.updateCommitIndex(me)
 		} else {
-			rf.nextIndex[peerId]--
+			if reply.LastLogTerm == -1 {
+				//[4],[4,6,6,6]
+				rf.nextIndex[peerId] = reply.FirstIndexOfLastLogTerm + 1
+			} else {
+				pos := rf.SearchFirstIndexOfTerm(reply.LastLogTerm)
+				if pos >= len(rf.log) || rf.log[pos].Term != reply.LastLogTerm {
+					//[4,5,5],[4,6,6,6]
+					rf.nextIndex[peerId] = reply.FirstIndexOfLastLogTerm
+				} else {
+					//[4,4,4],[4,6,6,6]
+					rf.nextIndex[peerId] = pos + 1
+				}
+			}
 		}
 	}
 }

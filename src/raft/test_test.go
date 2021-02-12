@@ -661,9 +661,9 @@ func TestPersist32C(t *testing.T) {
 	cfg.connect((leader + 2) % servers)
 	cfg.start1((leader + 0) % servers)
 	cfg.connect((leader + 0) % servers)
-
+	//	fmt.Println("____")
 	cfg.one(103, 2, true)
-
+	//	fmt.Println("____")
 	cfg.start1((leader + 1) % servers)
 	cfg.connect((leader + 1) % servers)
 

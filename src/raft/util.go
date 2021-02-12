@@ -3,6 +3,7 @@ package raft
 import (
 	"log"
 	"math/rand"
+	"sort"
 	"time"
 )
 
@@ -33,8 +34,10 @@ type AppendEntriesArgs struct {
 }
 
 type AppendEntriesReply struct {
-	Term    int
-	Success bool
+	Term                    int
+	Success                 bool
+	LastLogTerm             int
+	FirstIndexOfLastLogTerm int
 }
 
 //
@@ -99,6 +102,7 @@ func (rf *Raft) turnFollower(term int, voteFor int) {
 	rf.currentTerm = term
 	rf.votedFor = voteFor
 	rf.state = follower
+	rf.persist()
 	rf.resetElectionTimer()
 }
 
@@ -127,6 +131,7 @@ func (rf *Raft) turnCandidate(me int) {
 	rf.currentTerm++
 	rf.votedFor = me
 	rf.resetElectionTimer()
+	rf.persist()
 	rf.state = candidate
 }
 
@@ -141,4 +146,10 @@ func (rf *Raft) chSender(ch chan struct{}) {
 			}
 		}
 	}()
+}
+
+func (rf *Raft) SearchFirstIndexOfTerm(term int) int {
+	return sort.Search(len(rf.log), func(i int) bool {
+		return rf.log[i].Term > term-1
+	})
 }

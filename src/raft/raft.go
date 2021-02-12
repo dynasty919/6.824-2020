@@ -18,7 +18,10 @@ package raft
 //
 
 import (
+	"6.824/src/labgob"
+	"bytes"
 	"fmt"
+	log2 "log"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -126,6 +129,13 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.log)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	rf.persister.SaveRaftState(w.Bytes())
 }
 
 //
@@ -134,6 +144,22 @@ func (rf *Raft) persist() {
 func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
+	}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var log []LogEntry
+	var term, voteFor int
+	if d.Decode(&log) != nil ||
+		d.Decode(&term) != nil ||
+		d.Decode(&voteFor) != nil {
+		log2.Fatalf("labgob decode error")
+	} else {
+		rf.log = log
+		rf.currentTerm = term
+		rf.votedFor = voteFor
 	}
 	// Your code here (2C).
 	// Example:
@@ -226,6 +252,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Entry: command,
 		Term:  rf.currentTerm,
 	})
+	rf.persist()
 
 	index = len(rf.log) - 1
 	term = rf.currentTerm
@@ -270,11 +297,11 @@ func (rf *Raft) killed() bool {
 //
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
-	rf := &Raft{
-		peers:     peers,
-		persister: persister,
-		me:        me,
 
+	rf := &Raft{
+		peers:       peers,
+		persister:   persister,
+		me:          me,
 		state:       follower,
 		currentTerm: 0,
 		votedFor:    -1,
@@ -294,18 +321,24 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Your initialization code here (2A, 2B, 2C).
 
 	rand.Seed(time.Now().UnixNano())
+	rf.resetElectionTimer()
 
-	go rf.Run(me, peers)
+	rf.readPersist(persister.ReadRaftState())
 
 	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
+
+	go rf.Run(me, peers)
 
 	return rf
 }
 
 func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
-	rf.resetElectionTimer()
+
 	//	go rf.logApplyKicker(me)
+
+	rf.mu.Lock()
+	heartBeat := rf.heartBeatTimer
+	rf.mu.Unlock()
 
 	for !rf.killed() {
 
@@ -317,7 +350,6 @@ func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
 
 		rf.mu.Lock()
 		state := rf.state
-		heartBeat := rf.heartBeatTimer
 		electionTimeout := rf.electionTimeout
 		rf.mu.Unlock()
 
@@ -329,6 +361,8 @@ func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
 			case <-rf.voteCh:
 				continue
 			case <-time.After(electionTimeout):
+				rf.mu.Lock()
+				rf.mu.Unlock()
 				select {
 				case <-rf.appendLogCh:
 					continue
@@ -343,7 +377,7 @@ func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
 			}
 		case leader:
 			rf.Leader(me, peers)
-			time.Sleep(heartBeat)
+			<-time.After(heartBeat)
 		default:
 			panic("unknown state" + strconv.Itoa(int(state)))
 		}

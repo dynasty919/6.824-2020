@@ -13,7 +13,6 @@ func (rf *Raft) Candidate(me int, peers []*labrpc.ClientEnd) {
 		LastLogIndex: len(rf.log) - 1,
 		LastLogTerm:  rf.log[len(rf.log)-1].Term,
 	}
-
 	rf.mu.Unlock()
 
 	DPrintln("candidate ", me, " start to hold election , has term ", term)
