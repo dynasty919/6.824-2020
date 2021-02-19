@@ -7,7 +7,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	if args.Term > rf.currentTerm { //all server rule 1 If RPC request or response contains term T > currentTerm:
 		rf.turnFollower(args.Term, -1) // set currentTerm = T, convert to follower (§5.1)
 	}
@@ -28,6 +27,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.persist()
 		rf.chSender(rf.voteCh) //because If election timeout elapses without receiving granting vote to candidate, so wake up
 	}
+	rf.mu.Unlock()
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {

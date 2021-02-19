@@ -71,9 +71,9 @@ func (rf *Raft) updateLastApplied() {
 		rf.lastApplied++
 		curLog := rf.log[rf.lastApplied]
 		applyMsg := ApplyMsg{
-			true,
-			curLog.Entry,
-			rf.lastApplied,
+			CommandValid: true,
+			Command:      curLog.Entry,
+			CommandIndex: rf.lastApplied,
 		}
 		rf.applyChan <- applyMsg
 	}

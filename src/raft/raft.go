@@ -351,6 +351,7 @@ func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
 		rf.mu.Lock()
 		state := rf.state
 		electionTimeout := rf.electionTimeout
+		curTerm := rf.currentTerm
 		rf.mu.Unlock()
 
 		switch state {
@@ -361,22 +362,22 @@ func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
 			case <-rf.voteCh:
 				continue
 			case <-time.After(electionTimeout):
-				rf.mu.Lock()
-				rf.mu.Unlock()
-				select {
-				case <-rf.appendLogCh:
-					continue
-				case <-rf.voteCh:
-					continue
-				default:
+				func() {
 					rf.mu.Lock()
-					rf.turnCandidate(me)
-					rf.mu.Unlock()
-					rf.Candidate(me, peers)
-				}
+					defer rf.mu.Unlock()
+					select {
+					case <-rf.appendLogCh:
+						return
+					case <-rf.voteCh:
+						return
+					default:
+						rf.turnCandidate(me)
+						rf.Candidate(me, peers)
+					}
+				}()
 			}
 		case leader:
-			rf.Leader(me, peers)
+			rf.Leader(me, peers, curTerm)
 			<-time.After(heartBeat)
 		default:
 			panic("unknown state" + strconv.Itoa(int(state)))

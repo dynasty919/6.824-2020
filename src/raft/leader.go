@@ -5,19 +5,18 @@ import (
 	"sort"
 )
 
-func (rf *Raft) Leader(me int, peers []*labrpc.ClientEnd) {
-
+func (rf *Raft) Leader(me int, peers []*labrpc.ClientEnd, curTerm int) {
 	for i, v := range peers {
 		if i != me {
-			go rf.sendHeartBeatToPeer(v, me, i)
+			go rf.sendHeartBeatToPeer(v, me, i, curTerm)
 		}
 	}
 }
 
-func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int) {
+func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int, curTerm int) {
 
 	rf.mu.Lock()
-	if rf.state != leader {
+	if rf.state != leader || rf.currentTerm != curTerm {
 		rf.mu.Unlock()
 		return
 	}
@@ -41,6 +40,7 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int) 
 		return
 	}
 	DPrintln("leader ", me, " sending heartbeat to server ", peerId, " succeed heartbeat term ", args.Term)
+
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -65,7 +65,6 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int) 
 	if reply.Term > term {
 		DPrintln("leader ", me, " receive bigger term from ", peerId, " of term ", reply.Term)
 		rf.turnFollower(reply.Term, -1)
-		return
 	} else {
 		if reply.Success {
 			rf.nextIndex[peerId] = args.PrevLogIndex + len(args.Entries) + 1
