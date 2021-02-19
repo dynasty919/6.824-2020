@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 )
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -53,7 +53,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	done := make(chan struct{})
 	kv.opChan <- Op{
-		Operation: "get",
+		Operation: "Get",
 		Key:       args.Key,
 		Num:       args.Num,
 		Reply:     reply,
@@ -117,6 +117,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
+	labgob.Register(GetReply{})
+	labgob.Register(PutAppendReply{})
 
 	kv := new(KVServer)
 	kv.me = me
@@ -156,11 +158,9 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 			e.Encode(op.OriginServer)
 			e.Encode(op.IndexInServer)
 			e.Encode(op.Num)
-			e.Encode(op.Reply)
 			e.Encode(op.Operation)
 			e.Encode(op.Key)
 			e.Encode(op.Value)
-			e.Encode(op.Done)
 			_, _, isLeader := kv.rf.Start(b.Bytes())
 			if !isLeader {
 				op.Reply.WriteError("server " + strconv.Itoa(me) + " is not leader")
@@ -193,12 +193,10 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 			d := labgob.NewDecoder(b)
 			var origin, index int
 			var num int64
-			var reply OpReply
 			var operation, key, value string
-			var done chan struct{}
-			if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&num) != nil || d.Decode(&reply) != nil ||
-				d.Decode(operation) != nil || d.Decode(key) != nil || d.Decode(&value) != nil || d.Decode(done) != nil {
-				log.Fatalf("labgob decode error")
+			if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&num) != nil ||
+				d.Decode(&operation) != nil || d.Decode(&key) != nil || d.Decode(&value) != nil {
+				log.Fatalf("labgob decode error in server %d", me)
 			} else {
 				if _, ok := applied[num]; ok {
 					continue
@@ -214,6 +212,7 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 					} else {
 						dict[key] += value
 					}
+					DPrintf("server %d has %s key %s with value %s", me, operation, key, value)
 				}
 
 				if origin != me {
@@ -232,7 +231,8 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 				}
 
 				if operation == "Get" {
-					reply.WriteVal(dict[key])
+					unAppliedQueue[0].Reply.WriteVal(dict[key])
+					DPrintf("server %d has %s key %s with value %s", me, operation, key, dict[key])
 				}
 				unAppliedQueue[0].Done <- struct{}{}
 				unAppliedQueue = unAppliedQueue[1:]
