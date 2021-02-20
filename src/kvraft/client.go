@@ -2,6 +2,7 @@ package kvraft
 
 import (
 	"6.824/src/labrpc"
+	"sync"
 )
 import "crypto/rand"
 import "math/big"
@@ -9,6 +10,8 @@ import "math/big"
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	lock           sync.Mutex
+	possibleLeader int
 }
 
 func nrand() int64 {
@@ -40,27 +43,28 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
+
 	args := GetArgs{
-		Key: key,
-		Num: nrand(),
+		Key:   key,
+		NRand: nrand(),
 	}
 	var reply GetReply
-	i := 0
+
 	for {
 		reply = GetReply{
 			Err:   "",
 			Value: "",
 		}
-		ok := ck.servers[i].Call("KVServer.Get", &args, &reply)
-		//	DPrintf("client call server %d , get value of key %s", i, key)
+		ok := ck.servers[ck.possibleLeader].Call("KVServer.Get", &args, &reply)
+		//		DPrintf("client call server %d , try to get value of key %s", i, key)
 		if ok && reply.Err.isNil() {
-			DPrintf("client call server %d , get value of key %s succeed!!!", i, key)
+			DPrintf("client call server %d , get value %s of key %s succeed!!!", ck.possibleLeader, reply.Value, key)
 			break
 		} else {
 			if !reply.Err.isNil() {
 				//			DPrintf("%v", reply.Err)
 			}
-			i = (i + 1) % len(ck.servers)
+			ck.possibleLeader = (ck.possibleLeader + 1) % len(ck.servers)
 		}
 	}
 	return reply.Value
@@ -78,26 +82,26 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+
 	args := PutAppendArgs{
 		Key:   key,
 		Value: value,
 		Op:    op,
-		Num:   nrand(),
+		NRand: nrand(),
 	}
 	var reply PutAppendReply
-	i := 0
 	for {
 		reply = PutAppendReply{Err: ""}
-		ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
-		//	DPrintf("client call server %d , %s key %s with value %s", i, op, key, value)
+		ok := ck.servers[ck.possibleLeader].Call("KVServer.PutAppend", &args, &reply)
+		DPrintf("client call server %d , %s key %s with value %s", ck.possibleLeader, op, key, value)
 		if ok && reply.Err.isNil() {
-			DPrintf("client call server %d , %s key %s with value %s succeed!!!", i, op, key, value)
+			DPrintf("client call server %d , %s key %s with value %s succeed!!!", ck.possibleLeader, op, key, value)
 			break
 		} else {
 			if !reply.Err.isNil() {
-				//			DPrintf("%v", reply.Err)
+				DPrintf("%v", reply.Err)
 			}
-			i = (i + 1) % len(ck.servers)
+			ck.possibleLeader = (ck.possibleLeader + 1) % len(ck.servers)
 		}
 	}
 	return

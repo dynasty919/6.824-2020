@@ -5,13 +5,14 @@ import (
 	"6.824/src/labrpc"
 	"6.824/src/raft"
 	"bytes"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
 	"sync/atomic"
 )
 
-const Debug = 1
+const Debug = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -24,14 +25,15 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
-	Operation     string
-	Key           string
-	Value         string
-	Num           int64
-	Reply         OpReply
-	Done          chan struct{}
-	OriginServer  int
-	IndexInServer int
+	Operation        string
+	Key              string
+	Value            string
+	NRand            int64
+	Reply            OpReply
+	Done             chan struct{}
+	OriginServer     int
+	IndexInServer    int
+	RaftCommandIndex int
 }
 
 type KVServer struct {
@@ -44,21 +46,24 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	opChan    chan Op
-	unApplied chan Op
+	opChan    chan *Op
+	unApplied chan *Op
 	killChan  chan struct{}
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
+
 	// Your code here.
+
 	done := make(chan struct{})
-	kv.opChan <- Op{
+	kv.opChan <- &Op{
 		Operation: "Get",
 		Key:       args.Key,
-		Num:       args.Num,
+		NRand:     args.NRand,
 		Reply:     reply,
 		Done:      done,
 	}
+	DPrintf("server %d receive Get RPC from client with key %s NRand %d", kv.me, args.Key, args.NRand)
 	<-done
 }
 
@@ -66,14 +71,16 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 
 	done := make(chan struct{})
-	kv.opChan <- Op{
+	kv.opChan <- &Op{
 		Operation: args.Op,
 		Key:       args.Key,
 		Value:     args.Value,
-		Num:       args.Num,
+		NRand:     args.NRand,
 		Reply:     reply,
 		Done:      done,
 	}
+	DPrintf("server %d receive %s RPC from client with key %s , value %s ,NRand %d ",
+		kv.me, args.Op, args.Key, args.Value, args.NRand)
 	<-done
 }
 
@@ -130,8 +137,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	kv.killChan = make(chan struct{})
-	kv.opChan = make(chan Op)
-	kv.unApplied = make(chan Op)
+	kv.opChan = make(chan *Op)
+	kv.unApplied = make(chan *Op)
 	// You may need initialization code here.
 	go kv.Run(me, persister, maxraftstate)
 	go kv.StateMachine(me, persister, maxraftstate)
@@ -147,7 +154,7 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 			return
 		default:
 		}
-
+		DPrintf("Run of server %d is ready to take op from opChan", me)
 		select {
 		case op := <-kv.opChan:
 			op.OriginServer = me
@@ -157,15 +164,17 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 			e := labgob.NewEncoder(b)
 			e.Encode(op.OriginServer)
 			e.Encode(op.IndexInServer)
-			e.Encode(op.Num)
+			e.Encode(op.NRand)
 			e.Encode(op.Operation)
 			e.Encode(op.Key)
 			e.Encode(op.Value)
-			_, _, isLeader := kv.rf.Start(b.Bytes())
+			commandIndex, _, isLeader := kv.rf.Start(b.Bytes())
 			if !isLeader {
 				op.Reply.WriteError("server " + strconv.Itoa(me) + " is not leader")
 				op.Done <- struct{}{}
 			} else {
+				DPrintf("server %d believe it is leader, operation sent to queue!!!", me)
+				op.RaftCommandIndex = commandIndex
 				kv.unApplied <- op
 			}
 		}
@@ -176,7 +185,7 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 
 	dict := make(map[string]string)
 	applied := make(map[int64]struct{})
-	var unAppliedQueue []Op
+	var unAppliedQueue []*Op
 
 	for {
 		select {
@@ -184,58 +193,82 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 			return
 		default:
 		}
-
+		DPrintf("state machine of server %d is ready to select", me)
 		select {
 		case op := <-kv.unApplied:
+			DPrintf("state machine of server %d put op into unAppliedQueue", me)
 			unAppliedQueue = append(unAppliedQueue, op)
 		case msg := <-kv.applyCh:
 			b := bytes.NewBuffer(msg.Command.([]byte))
 			d := labgob.NewDecoder(b)
 			var origin, index int
-			var num int64
+			var NRand int64
 			var operation, key, value string
-			if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&num) != nil ||
+			if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&NRand) != nil ||
 				d.Decode(&operation) != nil || d.Decode(&key) != nil || d.Decode(&value) != nil {
 				log.Fatalf("labgob decode error in server %d", me)
+				DPrintf("labgob decode error in server %d", me)
 			} else {
-				if _, ok := applied[num]; ok {
-					continue
-				} else {
-					applied[num] = struct{}{}
-				}
+				DPrintf("incoming msg from applyCh in state machine of server %d of commandIndex %d,"+
+					"origin:%d, index:%d, NRand:%d, operation:%s, key:%s, value:%s, queue:%v",
+					me, msg.CommandIndex, origin, index, NRand, operation, key, value, unAppliedQueue)
 
-				if operation == "Put" {
-					dict[key] = value
-				} else if operation == "Append" {
-					if _, ok := dict[key]; !ok {
+				_, ok := applied[NRand]
+
+				if !ok {
+					applied[NRand] = struct{}{}
+					if operation == "Put" {
 						dict[key] = value
-					} else {
-						dict[key] += value
+						DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, value, unAppliedQueue)
+					} else if operation == "Append" {
+						if _, ok := dict[key]; !ok {
+							dict[key] = value
+						} else {
+							dict[key] += value
+						}
+						DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, value, unAppliedQueue)
 					}
-					DPrintf("server %d has %s key %s with value %s", me, operation, key, value)
+				} else {
+					DPrintf("server %d has abandoned duplicated PutAppend operation NRand %d", me, NRand)
 				}
 
-				if origin != me {
-					continue
-				}
-
-				for len(unAppliedQueue) > 0 && unAppliedQueue[0].IndexInServer < index {
-					unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
-						" is no longer leader")
-					unAppliedQueue[0].Done <- struct{}{}
-					unAppliedQueue = unAppliedQueue[1:]
-				}
-
-				if len(unAppliedQueue) == 0 || unAppliedQueue[0].IndexInServer != index {
-					panic("something is seriously fucked")
-				}
-
+				res := ""
 				if operation == "Get" {
-					unAppliedQueue[0].Reply.WriteVal(dict[key])
-					DPrintf("server %d has %s key %s with value %s", me, operation, key, dict[key])
+					if v, ok := dict[key]; ok {
+						res = v
+					}
+					DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, dict[key], unAppliedQueue)
 				}
-				unAppliedQueue[0].Done <- struct{}{}
-				unAppliedQueue = unAppliedQueue[1:]
+
+				if len(unAppliedQueue) > 0 && unAppliedQueue[0].RaftCommandIndex == msg.CommandIndex {
+					if unAppliedQueue[0].NRand != NRand {
+						unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
+							" is no longer leader, index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) + " abandoned")
+						unAppliedQueue[0].Done <- struct{}{}
+						unAppliedQueue = unAppliedQueue[1:]
+					}
+				}
+
+				if origin == me {
+					for len(unAppliedQueue) > 0 && unAppliedQueue[0].IndexInServer != index {
+						unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
+							" couldn't commit entry when it was leader, index " +
+							strconv.Itoa(unAppliedQueue[0].IndexInServer) + " abandoned")
+						unAppliedQueue[0].Done <- struct{}{}
+						unAppliedQueue = unAppliedQueue[1:]
+					}
+
+					if len(unAppliedQueue) == 0 || unAppliedQueue[0].IndexInServer != index {
+						fmt.Println(unAppliedQueue, unAppliedQueue[0].IndexInServer, index)
+						panic("something is seriously fucked in server " + strconv.Itoa(me))
+					} else {
+						if operation == "Get" {
+							unAppliedQueue[0].Reply.WriteVal(res)
+						}
+						unAppliedQueue[0].Done <- struct{}{}
+						unAppliedQueue = unAppliedQueue[1:]
+					}
+				}
 			}
 		}
 	}
