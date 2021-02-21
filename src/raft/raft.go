@@ -246,8 +246,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		return 0, 0, false
 	}
 
-	DPrintln("client send to leader ", me, "command", command)
-
 	rf.log = append(rf.log, LogEntry{
 		Entry: command,
 		Term:  rf.currentTerm,
@@ -258,6 +256,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	term = rf.currentTerm
 	isLeader = true
 
+	DPrintln("client send to leader ", me, "command", command, "commandIndex", index, "term", term)
 	return index, term, isLeader
 }
 
@@ -275,7 +274,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
-	fmt.Println("test is killing server")
+	fmt.Println("test is killing Raft server")
 	rf.chSender(rf.killChan)
 }
 
@@ -326,7 +325,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	// initialize from state persisted before a crash
-
+	DPrintln("test is starting server ", me, "log length", len(rf.log), "last log entry", rf.log[len(rf.log)-1],
+		"term", rf.currentTerm, " commitIndex", rf.commitIndex,
+		"last applied", rf.lastApplied)
 	go rf.Run(me, peers)
 
 	return rf

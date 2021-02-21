@@ -5,11 +5,11 @@ import (
 	"6.824/src/labrpc"
 	"6.824/src/raft"
 	"bytes"
-	"fmt"
 	"log"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const Debug = 0
@@ -49,6 +49,9 @@ type KVServer struct {
 	opChan    chan *Op
 	unApplied chan *Op
 	killChan  chan struct{}
+
+	dict    sync.Map
+	applied sync.Map
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -98,6 +101,7 @@ func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
 	// Your code here, if desired.
+	DPrintf("test is killing kv server!!!")
 	close(kv.killChan)
 }
 
@@ -173,7 +177,8 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 				op.Reply.WriteError("server " + strconv.Itoa(me) + " is not leader")
 				op.Done <- struct{}{}
 			} else {
-				DPrintf("server %d believe it is leader, operation sent to queue!!!", me)
+				DPrintf("server %d believe it is leader, operation sent to queue, have index %d!!!",
+					me, op.IndexInServer)
 				op.RaftCommandIndex = commandIndex
 				kv.unApplied <- op
 			}
@@ -183,8 +188,8 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 
 func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate int) {
 
-	dict := make(map[string]string)
-	applied := make(map[int64]struct{})
+	//	dict := make(map[string]string)
+	//	applied := make(map[int64]struct{})
 	var unAppliedQueue []*Op
 
 	for {
@@ -213,20 +218,22 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 					"origin:%d, index:%d, NRand:%d, operation:%s, key:%s, value:%s, queue:%v",
 					me, msg.CommandIndex, origin, index, NRand, operation, key, value, unAppliedQueue)
 
-				_, ok := applied[NRand]
+				_, ok := kv.applied.Load(NRand)
 
 				if !ok {
-					applied[NRand] = struct{}{}
+					kv.applied.Store(NRand, struct{}{})
 					if operation == "Put" {
-						dict[key] = value
-						DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, value, unAppliedQueue)
+						kv.dict.Store(key, value)
+						DPrintf("server %d has %s key %s with value %s, queue %v",
+							me, operation, key, value, unAppliedQueue)
 					} else if operation == "Append" {
-						if _, ok := dict[key]; !ok {
-							dict[key] = value
+						if v, ok := kv.dict.Load(key); !ok {
+							kv.dict.Store(key, value)
 						} else {
-							dict[key] += value
+							kv.dict.Store(key, v.(string)+value)
 						}
-						DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, value, unAppliedQueue)
+						DPrintf("server %d has %s key %s with value %s, queue %v",
+							me, operation, key, value, unAppliedQueue)
 					}
 				} else {
 					DPrintf("server %d has abandoned duplicated PutAppend operation NRand %d", me, NRand)
@@ -234,14 +241,17 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 
 				res := ""
 				if operation == "Get" {
-					if v, ok := dict[key]; ok {
-						res = v
+					if v, ok := kv.dict.Load(key); ok {
+						res = v.(string)
 					}
-					DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, dict[key], unAppliedQueue)
+					DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, res, unAppliedQueue)
 				}
 
 				if len(unAppliedQueue) > 0 && unAppliedQueue[0].RaftCommandIndex == msg.CommandIndex {
 					if unAppliedQueue[0].NRand != NRand {
+						DPrintf("operation of NRand %d failed probably due to server "+strconv.Itoa(me)+
+							" is no longer leader, index "+strconv.Itoa(unAppliedQueue[0].IndexInServer)+" abandoned",
+							NRand)
 						unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
 							" is no longer leader, index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) + " abandoned")
 						unAppliedQueue[0].Done <- struct{}{}
@@ -250,25 +260,41 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 				}
 
 				if origin == me {
-					for len(unAppliedQueue) > 0 && unAppliedQueue[0].IndexInServer != index {
-						unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
-							" couldn't commit entry when it was leader, index " +
-							strconv.Itoa(unAppliedQueue[0].IndexInServer) + " abandoned")
-						unAppliedQueue[0].Done <- struct{}{}
-						unAppliedQueue = unAppliedQueue[1:]
+					if len(unAppliedQueue) == 0 || unAppliedQueue[0].IndexInServer != index {
+						//unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
+						//	" couldn't commit entry when it was leader, index " +
+						//	strconv.Itoa(unAppliedQueue[0].IndexInServer) + " abandoned")
+						//unAppliedQueue[0].Done <- struct{}{}
+						//unAppliedQueue = unAppliedQueue[1:]
+						DPrintf("incoming operation if NRand %d to server "+strconv.Itoa(me)+
+							" is outdated and may has been dumped, queue %v", NRand, unAppliedQueue)
+						continue
 					}
 
-					if len(unAppliedQueue) == 0 || unAppliedQueue[0].IndexInServer != index {
-						fmt.Println(unAppliedQueue, unAppliedQueue[0].IndexInServer, index)
-						panic("something is seriously fucked in server " + strconv.Itoa(me))
-					} else {
-						if operation == "Get" {
-							unAppliedQueue[0].Reply.WriteVal(res)
-						}
-						unAppliedQueue[0].Done <- struct{}{}
-						unAppliedQueue = unAppliedQueue[1:]
+					//if len(unAppliedQueue) == 0 || unAppliedQueue[0].IndexInServer != index {
+					//	fmt.Println(unAppliedQueue, index)//unAppliedQueue[0].IndexInServer
+					//	panic("something is seriously fucked in server " + strconv.Itoa(me))
+					//} else {
+					if operation == "Get" {
+						unAppliedQueue[0].Reply.WriteVal(res)
 					}
+					unAppliedQueue[0].Done <- struct{}{}
+					unAppliedQueue = unAppliedQueue[1:]
+					//}
 				}
+			}
+		case <-time.After(time.Second):
+			if len(unAppliedQueue) == 0 {
+				continue
+			} else {
+				DPrintf("server " + strconv.Itoa(me) + " timeout waiting for a reply from raft" +
+					", index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) +
+					", NRand" + strconv.Itoa(int(unAppliedQueue[0].NRand)) + " abandoned")
+				unAppliedQueue[0].Reply.WriteError("server " + strconv.Itoa(me) + " timeout waiting for a reply from raft" +
+					", index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) +
+					", NRand" + strconv.Itoa(int(unAppliedQueue[0].NRand)) + " abandoned")
+				unAppliedQueue[0].Done <- struct{}{}
+				unAppliedQueue = unAppliedQueue[1:]
 			}
 		}
 	}

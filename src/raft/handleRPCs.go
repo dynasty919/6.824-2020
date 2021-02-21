@@ -74,25 +74,34 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	index := args.PrevLogIndex
 	for i := 0; i < len(args.Entries); i++ {
 		index++
-		if index >= len(rf.log) {
-			rf.log = append(rf.log, args.Entries[i:]...)
-			rf.persist()
-			break
+		//if index >= len(rf.log) {
+		//	rf.log = append(rf.log, args.Entries[i:]...)
+		//	rf.persist()
+		//	break
+		//}
+		//if rf.log[index].Term != args.Entries[i].Term {
+		//	rf.log = rf.log[:index]
+		//	rf.log = append(rf.log, args.Entries[i:]...)
+		//	rf.persist()
+		//	break
+		//}
+		if index < len(rf.log) {
+			if rf.log[index].Term == args.Entries[i].Term {
+				continue
+			} else {
+				rf.log = rf.log[:index]
+			}
 		}
-		if rf.log[index].Term != args.Entries[i].Term {
-			rf.log = rf.log[:index]
-			rf.log = append(rf.log, args.Entries[i:]...)
-			rf.persist()
-			break
-		}
+		rf.log = append(rf.log, args.Entries[i:]...)
+		rf.persist()
+		break
 	}
 
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex+len(args.Entries))
 
-		log := rf.log
 		commitIndex := rf.commitIndex
-		DPrintln("server ", me, " have updated commitIndex, now log is", log, " commitIndex is ", commitIndex)
+		DPrintln("server ", me, " have updated commitIndex,log length", len(rf.log), "now commitIndex is ", commitIndex)
 		rf.updateLastApplied()
 	}
 	reply.Success = true

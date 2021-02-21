@@ -3,6 +3,7 @@ package kvraft
 import (
 	"6.824/src/labrpc"
 	"sync"
+	"time"
 )
 import "crypto/rand"
 import "math/big"
@@ -55,17 +56,23 @@ func (ck *Clerk) Get(key string) string {
 			Err:   "",
 			Value: "",
 		}
-		ok := ck.servers[ck.possibleLeader].Call("KVServer.Get", &args, &reply)
+
 		//		DPrintf("client call server %d , try to get value of key %s", i, key)
+
+		ok := ck.servers[ck.possibleLeader].Call("KVServer.Get", &args, &reply)
 		if ok && reply.Err.isNil() {
-			DPrintf("client call server %d , get value %s of key %s succeed!!!", ck.possibleLeader, reply.Value, key)
+			DPrintf("client call server %d , get value %s of key %s NRand %d succeed!!!",
+				ck.possibleLeader, reply.Value, key, args.NRand)
 			break
 		} else {
 			if !reply.Err.isNil() {
 				//			DPrintf("%v", reply.Err)
 			}
 			ck.possibleLeader = (ck.possibleLeader + 1) % len(ck.servers)
+			time.Sleep(time.Millisecond * 100)
+			continue
 		}
+
 	}
 	return reply.Value
 }
@@ -92,19 +99,21 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	var reply PutAppendReply
 	for {
 		reply = PutAppendReply{Err: ""}
-		ok := ck.servers[ck.possibleLeader].Call("KVServer.PutAppend", &args, &reply)
 		DPrintf("client call server %d , %s key %s with value %s", ck.possibleLeader, op, key, value)
+		ok := ck.servers[ck.possibleLeader].Call("KVServer.PutAppend", &args, &reply)
 		if ok && reply.Err.isNil() {
-			DPrintf("client call server %d , %s key %s with value %s succeed!!!", ck.possibleLeader, op, key, value)
+			DPrintf("client call server %d , %s key %s with value %s NRand %d succeed!!!",
+				ck.possibleLeader, op, key, value, args.NRand)
 			break
 		} else {
 			if !reply.Err.isNil() {
 				DPrintf("%v", reply.Err)
 			}
 			ck.possibleLeader = (ck.possibleLeader + 1) % len(ck.servers)
+			time.Sleep(time.Millisecond * 100)
+			continue
 		}
 	}
-	return
 }
 
 func (ck *Clerk) Put(key string, value string) {

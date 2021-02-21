@@ -93,17 +93,21 @@ func (rf *Raft) receivedEntriesAlreadyExist(args *AppendEntriesArgs) bool {
 }
 
 func (rf *Raft) getEntries(peerId int) []LogEntry {
-	nextIndex := rf.nextIndex[peerId]
+	nextIndex := min(rf.nextIndex[peerId], len(rf.log))
 	entries := append([]LogEntry{}, rf.log[nextIndex:]...)
 	return entries
+}
+
+func (rf *Raft) getPrevLogIndex(peerId int) int {
+	return min(rf.nextIndex[peerId]-1, len(rf.log)-1)
 }
 
 func (rf *Raft) turnFollower(term int, voteFor int) {
 	rf.currentTerm = term
 	rf.votedFor = voteFor
 	rf.state = follower
-	rf.persist()
 	rf.resetElectionTimer()
+	rf.persist()
 }
 
 func (rf *Raft) turnLeader(me int, peersNum int) {
@@ -131,8 +135,8 @@ func (rf *Raft) turnCandidate(me int) {
 	rf.currentTerm++
 	rf.votedFor = me
 	rf.resetElectionTimer()
-	rf.persist()
 	rf.state = candidate
+	rf.persist()
 }
 
 func (rf *Raft) chSender(ch chan struct{}) {
@@ -150,6 +154,6 @@ func (rf *Raft) chSender(ch chan struct{}) {
 
 func (rf *Raft) SearchFirstIndexOfTerm(term int) int {
 	return sort.Search(len(rf.log), func(i int) bool {
-		return rf.log[i].Term > term-1
+		return rf.log[i].Term >= term
 	})
 }
