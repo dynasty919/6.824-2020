@@ -272,7 +272,8 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 						//unAppliedQueue[0].Done <- struct{}{}
 						//unAppliedQueue = unAppliedQueue[1:]
 						DPrintf("incoming operation of NRand %d to server "+strconv.Itoa(me)+
-							" is outdated and may has been dumped, queue %v, db %v", NRand, unAppliedQueue, kv.db)
+							" is outdated and may has been executed or dumped, queue %v, db %v",
+							NRand, unAppliedQueue, kv.db)
 						continue
 					}
 
