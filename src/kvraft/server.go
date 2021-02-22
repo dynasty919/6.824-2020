@@ -5,6 +5,7 @@ import (
 	"6.824/src/labrpc"
 	"6.824/src/raft"
 	"bytes"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -50,7 +51,7 @@ type KVServer struct {
 	unApplied chan *Op
 	killChan  chan struct{}
 
-	dict    sync.Map
+	db      sync.Map
 	applied sync.Map
 }
 
@@ -66,6 +67,8 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		Reply:     reply,
 		Done:      done,
 	}
+	reply.Server = kv.me
+	//reply.WriteError("default error, if you see this it's likely server " + strconv.Itoa(kv.me)+" has been crashed")
 	DPrintf("server %d receive Get RPC from client with key %s NRand %d", kv.me, args.Key, args.NRand)
 	<-done
 }
@@ -82,6 +85,8 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		Reply:     reply,
 		Done:      done,
 	}
+	reply.Server = kv.me
+	//reply.WriteError("default error, if you see this it's likely server " + strconv.Itoa(kv.me)+" has been crashed")
 	DPrintf("server %d receive %s RPC from client with key %s , value %s ,NRand %d ",
 		kv.me, args.Op, args.Key, args.Value, args.NRand)
 	<-done
@@ -101,7 +106,7 @@ func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
 	// Your code here, if desired.
-	DPrintf("test is killing kv server!!!")
+	fmt.Println("test is killing kv server!!!")
 	close(kv.killChan)
 }
 
@@ -223,14 +228,14 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 				if !ok {
 					kv.applied.Store(NRand, struct{}{})
 					if operation == "Put" {
-						kv.dict.Store(key, value)
+						kv.db.Store(key, value)
 						DPrintf("server %d has %s key %s with value %s, queue %v",
 							me, operation, key, value, unAppliedQueue)
 					} else if operation == "Append" {
-						if v, ok := kv.dict.Load(key); !ok {
-							kv.dict.Store(key, value)
+						if v, ok := kv.db.Load(key); !ok {
+							kv.db.Store(key, value)
 						} else {
-							kv.dict.Store(key, v.(string)+value)
+							kv.db.Store(key, v.(string)+value)
 						}
 						DPrintf("server %d has %s key %s with value %s, queue %v",
 							me, operation, key, value, unAppliedQueue)
@@ -241,7 +246,7 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 
 				res := ""
 				if operation == "Get" {
-					if v, ok := kv.dict.Load(key); ok {
+					if v, ok := kv.db.Load(key); ok {
 						res = v.(string)
 					}
 					DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, res, unAppliedQueue)
@@ -260,14 +265,14 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 				}
 
 				if origin == me {
-					if len(unAppliedQueue) == 0 || unAppliedQueue[0].IndexInServer != index {
+					if len(unAppliedQueue) == 0 || unAppliedQueue[0].NRand != NRand {
 						//unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
 						//	" couldn't commit entry when it was leader, index " +
 						//	strconv.Itoa(unAppliedQueue[0].IndexInServer) + " abandoned")
 						//unAppliedQueue[0].Done <- struct{}{}
 						//unAppliedQueue = unAppliedQueue[1:]
-						DPrintf("incoming operation if NRand %d to server "+strconv.Itoa(me)+
-							" is outdated and may has been dumped, queue %v", NRand, unAppliedQueue)
+						DPrintf("incoming operation of NRand %d to server "+strconv.Itoa(me)+
+							" is outdated and may has been dumped, queue %v, db %v", NRand, unAppliedQueue, kv.db)
 						continue
 					}
 

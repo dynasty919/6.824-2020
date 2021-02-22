@@ -25,7 +25,8 @@ type PutAppendArgs struct {
 }
 
 type PutAppendReply struct {
-	Err Err
+	Err    Err
+	Server int
 }
 
 type GetArgs struct {
@@ -35,8 +36,9 @@ type GetArgs struct {
 }
 
 type GetReply struct {
-	Err   Err
-	Value string
+	Err    Err
+	Value  string
+	Server int
 }
 
 func (err Err) isNil() bool {

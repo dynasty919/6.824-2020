@@ -53,16 +53,17 @@ func (ck *Clerk) Get(key string) string {
 
 	for {
 		reply = GetReply{
-			Err:   "",
-			Value: "",
+			Err:    "",
+			Value:  "",
+			Server: 0,
 		}
 
 		//		DPrintf("client call server %d , try to get value of key %s", i, key)
-
-		ok := ck.servers[ck.possibleLeader].Call("KVServer.Get", &args, &reply)
+		server := ck.possibleLeader
+		ok := ck.servers[server].Call("KVServer.Get", &args, &reply)
 		if ok && reply.Err.isNil() {
-			DPrintf("client call server %d , get value %s of key %s NRand %d succeed!!!",
-				ck.possibleLeader, reply.Value, key, args.NRand)
+			DPrintf("client call server %d , get value %s of key %s NRand %d from origin server %d succeed!!!",
+				server, reply.Value, key, args.NRand, reply.Server)
 			break
 		} else {
 			if !reply.Err.isNil() {
@@ -98,12 +99,16 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	}
 	var reply PutAppendReply
 	for {
-		reply = PutAppendReply{Err: ""}
-		DPrintf("client call server %d , %s key %s with value %s", ck.possibleLeader, op, key, value)
-		ok := ck.servers[ck.possibleLeader].Call("KVServer.PutAppend", &args, &reply)
+		reply = PutAppendReply{
+			Err:    "",
+			Server: 0,
+		}
+		server := ck.possibleLeader
+		DPrintf("client call server %d , %s key %s with value %s", server, op, key, value)
+		ok := ck.servers[server].Call("KVServer.PutAppend", &args, &reply)
 		if ok && reply.Err.isNil() {
-			DPrintf("client call server %d , %s key %s with value %s NRand %d succeed!!!",
-				ck.possibleLeader, op, key, value, args.NRand)
+			DPrintf("client call server %d , %s key %s with value %s NRand %d from origin server %d succeed!!!",
+				server, op, key, value, args.NRand, reply.Server)
 			break
 		} else {
 			if !reply.Err.isNil() {
