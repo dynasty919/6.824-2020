@@ -20,7 +20,6 @@ package raft
 import (
 	"6.824/src/labgob"
 	"bytes"
-	"fmt"
 	log2 "log"
 	"math/rand"
 	"strconv"
@@ -274,7 +273,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
-	fmt.Println("test is killing Raft server")
+	DPrintln("test is killing Raft server")
 	rf.chSender(rf.killChan)
 }
 

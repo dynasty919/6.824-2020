@@ -5,7 +5,6 @@ import (
 	"6.824/src/labrpc"
 	"6.824/src/raft"
 	"bytes"
-	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -68,7 +67,6 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		Done:      done,
 	}
 	reply.Server = kv.me
-	//reply.WriteError("default error, if you see this it's likely server " + strconv.Itoa(kv.me)+" has been crashed")
 	DPrintf("server %d receive Get RPC from client with key %s NRand %d", kv.me, args.Key, args.NRand)
 	<-done
 }
@@ -86,7 +84,6 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		Done:      done,
 	}
 	reply.Server = kv.me
-	//reply.WriteError("default error, if you see this it's likely server " + strconv.Itoa(kv.me)+" has been crashed")
 	DPrintf("server %d receive %s RPC from client with key %s , value %s ,NRand %d ",
 		kv.me, args.Op, args.Key, args.Value, args.NRand)
 	<-done
@@ -106,7 +103,7 @@ func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
 	// Your code here, if desired.
-	fmt.Println("test is killing kv server!!!")
+	DPrintf("test is killing kv server")
 	close(kv.killChan)
 }
 
@@ -182,7 +179,7 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 				op.Reply.WriteError("server " + strconv.Itoa(me) + " is not leader")
 				op.Done <- struct{}{}
 			} else {
-				DPrintf("server %d believe it is leader, operation sent to queue, have index %d!!!",
+				DPrintf("server %d believe it is leader, operation sent to queue, have server index %d!!!",
 					me, op.IndexInServer)
 				op.RaftCommandIndex = commandIndex
 				kv.unApplied <- op
@@ -203,6 +200,7 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 			return
 		default:
 		}
+
 		DPrintf("state machine of server %d is ready to select", me)
 		select {
 		case op := <-kv.unApplied:
@@ -266,27 +264,17 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 
 				if origin == me {
 					if len(unAppliedQueue) == 0 || unAppliedQueue[0].NRand != NRand {
-						//unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
-						//	" couldn't commit entry when it was leader, index " +
-						//	strconv.Itoa(unAppliedQueue[0].IndexInServer) + " abandoned")
-						//unAppliedQueue[0].Done <- struct{}{}
-						//unAppliedQueue = unAppliedQueue[1:]
 						DPrintf("incoming operation of NRand %d to server "+strconv.Itoa(me)+
-							" is outdated and may has been executed or dumped, queue %v, db %v",
-							NRand, unAppliedQueue, kv.db)
+							" may has been re-executed or is outdated and dumped, queue %v",
+							NRand, unAppliedQueue)
 						continue
 					}
 
-					//if len(unAppliedQueue) == 0 || unAppliedQueue[0].IndexInServer != index {
-					//	fmt.Println(unAppliedQueue, index)//unAppliedQueue[0].IndexInServer
-					//	panic("something is seriously fucked in server " + strconv.Itoa(me))
-					//} else {
 					if operation == "Get" {
 						unAppliedQueue[0].Reply.WriteVal(res)
 					}
 					unAppliedQueue[0].Done <- struct{}{}
 					unAppliedQueue = unAppliedQueue[1:]
-					//}
 				}
 			}
 		case <-time.After(time.Second):
