@@ -18,7 +18,6 @@ package raft
 //
 
 import (
-	"6.824/src/labgob"
 	"bytes"
 	log2 "log"
 	"math/rand"
@@ -26,6 +25,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"6.824/src/labgob"
 
 	"6.824/src/labrpc"
 )
@@ -48,6 +49,12 @@ type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
 	CommandIndex int
+
+	// For 2D:
+	SnapshotValid bool
+	Snapshot      []byte
+	SnapshotTerm  int
+	SnapshotIndex int
 }
 
 type LogEntry struct {

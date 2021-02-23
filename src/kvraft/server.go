@@ -1,15 +1,16 @@
 package kvraft
 
 import (
-	"6.824/src/labgob"
-	"6.824/src/labrpc"
-	"6.824/src/raft"
 	"bytes"
 	"log"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"6.824/src/labgob"
+	"6.824/src/labrpc"
+	"6.824/src/raft"
 )
 
 const Debug = 0
@@ -251,7 +252,7 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 				}
 
 				if len(unAppliedQueue) > 0 && unAppliedQueue[0].RaftCommandIndex == msg.CommandIndex {
-					if unAppliedQueue[0].NRand != NRand {
+					if unAppliedQueue[0].NRand != NRand || origin != me {
 						DPrintf("operation of NRand %d failed probably due to server "+strconv.Itoa(me)+
 							" is no longer leader, index "+strconv.Itoa(unAppliedQueue[0].IndexInServer)+" abandoned",
 							NRand)
