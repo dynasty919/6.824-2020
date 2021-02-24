@@ -13,15 +13,6 @@ import (
 	"6.824/src/raft"
 )
 
-const Debug = 0
-
-func DPrintf(format string, a ...interface{}) (n int, err error) {
-	if Debug > 0 {
-		log.Printf(format, a...)
-	}
-	return
-}
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
@@ -51,8 +42,10 @@ type KVServer struct {
 	unApplied chan *Op
 	killChan  chan struct{}
 
-	db      sync.Map
-	applied sync.Map
+	db      map[string]string
+	applied map[int64]struct{}
+
+	persister *raft.Persister
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -146,6 +139,12 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.killChan = make(chan struct{})
 	kv.opChan = make(chan *Op)
 	kv.unApplied = make(chan *Op)
+	kv.db = make(map[string]string)
+	kv.applied = make(map[int64]struct{})
+	kv.persister = persister
+	kv.LoadSnapShot(kv.persister.ReadSnapshot())
+
+	DPrintf("kv server %d starting, maxraftstate %d", me, maxraftstate)
 	// You may need initialization code here.
 	go kv.Run(me, persister, maxraftstate)
 	go kv.StateMachine(me, persister, maxraftstate)
@@ -208,76 +207,12 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 			DPrintf("state machine of server %d put op into unAppliedQueue", me)
 			unAppliedQueue = append(unAppliedQueue, op)
 		case msg := <-kv.applyCh:
-			b := bytes.NewBuffer(msg.Command.([]byte))
-			d := labgob.NewDecoder(b)
-			var origin, index int
-			var NRand int64
-			var operation, key, value string
-			if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&NRand) != nil ||
-				d.Decode(&operation) != nil || d.Decode(&key) != nil || d.Decode(&value) != nil {
-				log.Fatalf("labgob decode error in server %d", me)
-				DPrintf("labgob decode error in server %d", me)
+			if msg.CommandValid {
+				kv.ApplyCommand(me, persister, maxraftstate, &unAppliedQueue, &msg)
 			} else {
-				DPrintf("incoming msg from applyCh in state machine of server %d of commandIndex %d,"+
-					"origin:%d, index:%d, NRand:%d, operation:%s, key:%s, value:%s, queue:%v",
-					me, msg.CommandIndex, origin, index, NRand, operation, key, value, unAppliedQueue)
-
-				_, ok := kv.applied.Load(NRand)
-
-				if !ok {
-					kv.applied.Store(NRand, struct{}{})
-					if operation == "Put" {
-						kv.db.Store(key, value)
-						DPrintf("server %d has %s key %s with value %s, queue %v",
-							me, operation, key, value, unAppliedQueue)
-					} else if operation == "Append" {
-						if v, ok := kv.db.Load(key); !ok {
-							kv.db.Store(key, value)
-						} else {
-							kv.db.Store(key, v.(string)+value)
-						}
-						DPrintf("server %d has %s key %s with value %s, queue %v",
-							me, operation, key, value, unAppliedQueue)
-					}
-				} else {
-					DPrintf("server %d has abandoned duplicated PutAppend operation NRand %d", me, NRand)
-				}
-
-				res := ""
-				if operation == "Get" {
-					if v, ok := kv.db.Load(key); ok {
-						res = v.(string)
-					}
-					DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, res, unAppliedQueue)
-				}
-
-				if len(unAppliedQueue) > 0 && unAppliedQueue[0].RaftCommandIndex == msg.CommandIndex {
-					if unAppliedQueue[0].NRand != NRand || origin != me {
-						DPrintf("operation of NRand %d failed probably due to server "+strconv.Itoa(me)+
-							" is no longer leader, index "+strconv.Itoa(unAppliedQueue[0].IndexInServer)+" abandoned",
-							NRand)
-						unAppliedQueue[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
-							" is no longer leader, index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) + " abandoned")
-						unAppliedQueue[0].Done <- struct{}{}
-						unAppliedQueue = unAppliedQueue[1:]
-					}
-				}
-
-				if origin == me {
-					if len(unAppliedQueue) == 0 || unAppliedQueue[0].NRand != NRand {
-						DPrintf("incoming operation of NRand %d to server "+strconv.Itoa(me)+
-							" may has been re-executed or is outdated and dumped, queue %v",
-							NRand, unAppliedQueue)
-						continue
-					}
-
-					if operation == "Get" {
-						unAppliedQueue[0].Reply.WriteVal(res)
-					}
-					unAppliedQueue[0].Done <- struct{}{}
-					unAppliedQueue = unAppliedQueue[1:]
-				}
+				kv.LoadSnapShot(msg.Snapshot)
 			}
+
 		case <-time.After(time.Second):
 			if len(unAppliedQueue) == 0 {
 				continue
@@ -291,6 +226,84 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 				unAppliedQueue[0].Done <- struct{}{}
 				unAppliedQueue = unAppliedQueue[1:]
 			}
+		}
+	}
+}
+
+func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
+	maxraftstate int, unAppliedQueuePtr *[]*Op, msg *raft.ApplyMsg) {
+	commandIndex := msg.CommandIndex
+	if kv.needSnapShot() {
+		kv.createSnapShot(commandIndex)
+	}
+	b := bytes.NewBuffer(msg.Command.([]byte))
+	d := labgob.NewDecoder(b)
+	var origin, index int
+	var NRand int64
+	var operation, key, value string
+	if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&NRand) != nil ||
+		d.Decode(&operation) != nil || d.Decode(&key) != nil || d.Decode(&value) != nil {
+		log.Fatalf("labgob decode error in server %d", me)
+		DPrintf("labgob decode error in server %d", me)
+	} else {
+		DPrintf("incoming msg from applyCh in state machine of server %d of commandIndex %d,"+
+			"origin:%d, index:%d, NRand:%d, operation:%s, key:%s, value:%s, queue:%v",
+			me, msg.CommandIndex, origin, index, NRand, operation, key, value, (*unAppliedQueuePtr))
+
+		_, ok := kv.applied[NRand]
+
+		if !ok {
+			kv.applied[NRand] = struct{}{}
+			if operation == "Put" {
+				kv.db[key] = value
+				DPrintf("server %d has %s key %s with value %s, queue %v",
+					me, operation, key, value, (*unAppliedQueuePtr))
+			} else if operation == "Append" {
+				if _, ok := kv.db[key]; !ok {
+					kv.db[key] = value
+				} else {
+					kv.db[key] += value
+				}
+				DPrintf("server %d has %s key %s with value %s, queue %v",
+					me, operation, key, value, (*unAppliedQueuePtr))
+			}
+		} else {
+			DPrintf("server %d has abandoned duplicated PutAppend operation NRand %d", me, NRand)
+		}
+
+		res := ""
+		if operation == "Get" {
+			if v, ok := kv.db[key]; ok {
+				res = v
+			}
+			DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, res, (*unAppliedQueuePtr))
+		}
+
+		if len((*unAppliedQueuePtr)) > 0 && (*unAppliedQueuePtr)[0].RaftCommandIndex == msg.CommandIndex {
+			if (*unAppliedQueuePtr)[0].NRand != NRand || origin != me {
+				DPrintf("operation of NRand %d failed probably due to server "+strconv.Itoa(me)+
+					" is no longer leader, index "+strconv.Itoa((*unAppliedQueuePtr)[0].IndexInServer)+" abandoned",
+					NRand)
+				(*unAppliedQueuePtr)[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
+					" is no longer leader, index " + strconv.Itoa((*unAppliedQueuePtr)[0].IndexInServer) + " abandoned")
+				(*unAppliedQueuePtr)[0].Done <- struct{}{}
+				(*unAppliedQueuePtr) = (*unAppliedQueuePtr)[1:]
+			}
+		}
+
+		if origin == me {
+			if len((*unAppliedQueuePtr)) == 0 || (*unAppliedQueuePtr)[0].NRand != NRand {
+				DPrintf("incoming operation of NRand %d to server "+strconv.Itoa(me)+
+					" may has been re-executed or is outdated and dumped, queue %v",
+					NRand, (*unAppliedQueuePtr))
+				return
+			}
+
+			if operation == "Get" {
+				(*unAppliedQueuePtr)[0].Reply.WriteVal(res)
+			}
+			(*unAppliedQueuePtr)[0].Done <- struct{}{}
+			(*unAppliedQueuePtr) = (*unAppliedQueuePtr)[1:]
 		}
 	}
 }

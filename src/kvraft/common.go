@@ -1,10 +1,21 @@
 package kvraft
 
+import "log"
+
 const (
 	OK             = "OK"
 	ErrNoKey       = "ErrNoKey"
 	ErrWrongLeader = "ErrWrongLeader"
 )
+
+const Debug = 1
+
+func DPrintf(format string, a ...interface{}) (n int, err error) {
+	if Debug > 0 {
+		log.Printf(format, a...)
+	}
+	return
+}
 
 type Err string
 
@@ -62,17 +73,4 @@ func (reply *GetReply) WriteError(e string) {
 
 func (reply *GetReply) WriteVal(val string) {
 	reply.Value = val
-}
-
-func (kv *KVServer) sendChan(ch chan struct{}) {
-	go func() {
-		for {
-			select {
-			case <-ch:
-			default:
-				ch <- struct{}{}
-				return
-			}
-		}
-	}()
 }
