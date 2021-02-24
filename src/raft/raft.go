@@ -50,11 +50,7 @@ type ApplyMsg struct {
 	Command      interface{}
 	CommandIndex int
 
-	// For 2D:
-	SnapshotValid bool
-	Snapshot      []byte
-	SnapshotTerm  int
-	SnapshotIndex int
+	Snapshot []byte
 }
 
 type LogEntry struct {
@@ -102,6 +98,9 @@ type Raft struct {
 	voteCh      chan struct{}
 	applyChan   chan ApplyMsg
 	killChan    chan struct{}
+
+	lastIncludedIndex int
+	lastIncludedTerm  int
 }
 
 // return currentTerm and whether this server
@@ -141,6 +140,8 @@ func (rf *Raft) persist() {
 	e.Encode(rf.log)
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
+	e.Encode(rf.lastIncludedIndex)
+	e.Encode(rf.lastIncludedTerm)
 	rf.persister.SaveRaftState(w.Bytes())
 }
 
@@ -157,15 +158,19 @@ func (rf *Raft) readPersist(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var log []LogEntry
-	var term, voteFor int
+	var term, voteFor, lastIncludedIndex, lastIncludedTerm int
 	if d.Decode(&log) != nil ||
 		d.Decode(&term) != nil ||
-		d.Decode(&voteFor) != nil {
+		d.Decode(&voteFor) != nil ||
+		d.Decode(&lastIncludedIndex) != nil ||
+		d.Decode(&lastIncludedTerm) != nil {
 		log2.Fatalf("labgob decode error")
 	} else {
 		rf.log = log
 		rf.currentTerm = term
 		rf.votedFor = voteFor
+		rf.lastIncludedIndex = lastIncludedIndex
+		rf.lastIncludedTerm = lastIncludedTerm
 	}
 	// Your code here (2C).
 	// Example:
@@ -258,7 +263,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	})
 	rf.persist()
 
-	index = len(rf.log) - 1
+	index = rf.getLogLen() - 1
 	term = rf.currentTerm
 	isLeader = true
 
@@ -314,13 +319,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			Entry: 0,
 			Term:  0,
 		}},
-		commitIndex:    0,
-		lastApplied:    0,
-		heartBeatTimer: time.Millisecond * 100,
-		appendLogCh:    make(chan struct{}),
-		voteCh:         make(chan struct{}),
-		killChan:       make(chan struct{}),
-		applyChan:      applyCh,
+		commitIndex:       0,
+		lastApplied:       0,
+		heartBeatTimer:    time.Millisecond * 100,
+		appendLogCh:       make(chan struct{}),
+		voteCh:            make(chan struct{}),
+		killChan:          make(chan struct{}),
+		applyChan:         applyCh,
+		lastIncludedIndex: 0,
+		lastIncludedTerm:  0,
 	}
 
 	// Your initialization code here (2A, 2B, 2C).

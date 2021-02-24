@@ -8,7 +8,7 @@ import (
 )
 
 // Debugging
-const Debug = 0
+const Debug = 1
 
 func DPrintln(a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -19,6 +19,13 @@ func DPrintln(a ...interface{}) (n int, err error) {
 
 func min(a int, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a int, b int) int {
+	if a > b {
 		return a
 	}
 	return b
@@ -62,44 +69,63 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
+type SendSnapshotArg struct {
+	Term              int
+	LeaderId          int
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+type SendSnapshotReply struct {
+	Term int
+}
+
 func (rf *Raft) resetElectionTimer() {
 	rf.electionTimeout = time.Duration(300+rand.Intn(200)) * time.Millisecond
 }
 
 func (rf *Raft) updateLastApplied() {
+	rf.lastApplied = max(rf.lastApplied, rf.lastIncludedIndex)
+	rf.commitIndex = max(rf.commitIndex, rf.lastIncludedIndex)
 	for rf.lastApplied < rf.commitIndex {
 		rf.lastApplied++
-		curLog := rf.log[rf.lastApplied]
 		applyMsg := ApplyMsg{
 			CommandValid: true,
-			Command:      curLog.Entry,
+			Command:      rf.getLogEntry(rf.lastApplied).Entry,
 			CommandIndex: rf.lastApplied,
+			Snapshot:     nil,
 		}
+		rf.mu.Unlock()
 		rf.applyChan <- applyMsg
+		rf.mu.Lock()
 	}
-}
-
-func (rf *Raft) receivedEntriesAlreadyExist(args *AppendEntriesArgs) bool {
-	index := args.PrevLogIndex + 1
-	for _, v := range args.Entries {
-		if index < len(rf.log) && rf.log[index].Term == v.Term {
-			index++
-			continue
-		} else {
-			return false
-		}
-	}
-	return true
 }
 
 func (rf *Raft) getEntries(peerId int) []LogEntry {
-	nextIndex := min(rf.nextIndex[peerId], len(rf.log))
+	nextIndex := rf.getPrevLogIndex(peerId) + 1 - rf.lastIncludedIndex
 	entries := append([]LogEntry{}, rf.log[nextIndex:]...)
 	return entries
 }
 
 func (rf *Raft) getPrevLogIndex(peerId int) int {
-	return min(rf.nextIndex[peerId]-1, len(rf.log)-1)
+	return min(rf.nextIndex[peerId]-1, rf.getLogLen()-1)
+}
+
+func (rf *Raft) getLogLen() int {
+	return len(rf.log) + rf.lastIncludedIndex
+}
+
+func (rf *Raft) getLastLogIndex() int {
+	return rf.getLogLen() - 1
+}
+
+func (rf *Raft) getLastLogTerm() int {
+	return rf.log[rf.getLastLogIndex()].Term
+}
+
+func (rf *Raft) getLogEntry(i int) LogEntry {
+	return rf.log[i-rf.lastIncludedIndex]
 }
 
 func (rf *Raft) turnFollower(term int, voteFor int) {
@@ -118,7 +144,7 @@ func (rf *Raft) turnLeader(me int, peersNum int) {
 	rf.resetElectionTimer()
 	rf.nextIndex = make([]int, peersNum)
 	for i := 0; i < len(rf.nextIndex); i++ {
-		rf.nextIndex[i] = len(rf.log)
+		rf.nextIndex[i] = len(rf.log) + rf.lastIncludedIndex
 	}
 	rf.matchIndex = make([]int, peersNum)
 	for i := 0; i < len(rf.matchIndex); i++ {
@@ -155,5 +181,5 @@ func (rf *Raft) chSender(ch chan struct{}) {
 func (rf *Raft) SearchFirstIndexOfTerm(term int) int {
 	return sort.Search(len(rf.log), func(i int) bool {
 		return rf.log[i].Term >= term
-	})
+	}) + rf.lastIncludedIndex
 }

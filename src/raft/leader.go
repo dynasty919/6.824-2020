@@ -1,8 +1,9 @@
 package raft
 
 import (
-	"6.824/src/labrpc"
 	"sort"
+
+	"6.824/src/labrpc"
 )
 
 func (rf *Raft) Leader(me int, peers []*labrpc.ClientEnd, curTerm int) {
@@ -21,11 +22,17 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int, 
 		return
 	}
 
+	if rf.nextIndex[peerId] <= rf.lastIncludedIndex {
+		rf.sendSnapshotToPeer(peer, me, peerId, curTerm)
+		rf.mu.Unlock()
+		return
+	}
+
 	args := AppendEntriesArgs{
 		Term:         rf.currentTerm,
 		LeaderId:     me,
 		PrevLogIndex: rf.getPrevLogIndex(peerId),
-		PrevLogTerm:  rf.log[rf.getPrevLogIndex(peerId)].Term,
+		PrevLogTerm:  rf.getLogEntry(rf.getPrevLogIndex(peerId)).Term,
 		Entries:      rf.getEntries(peerId),
 		LeaderCommit: rf.commitIndex,
 	}
@@ -86,10 +93,9 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int, 
 				rf.nextIndex[peerId] = reply.FirstIndexOfLastLogTerm + 1
 			} else {
 				pos := rf.SearchFirstIndexOfTerm(reply.LastLogTerm)
-				if pos >= len(rf.log) || rf.log[pos].Term != reply.LastLogTerm {
+				if pos >= rf.getLogLen() || rf.getLogEntry(pos).Term != reply.LastLogTerm {
 					//[4,5,5],[4,6,6,6]
 					rf.nextIndex[peerId] = reply.FirstIndexOfLastLogTerm
-					//	rf.nextIndex[peerId]--
 				} else {
 					//[4,4,4],[4,6,6,6]
 					rf.nextIndex[peerId] = pos + 1
@@ -100,16 +106,18 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int, 
 }
 
 func (rf *Raft) updateCommitIndex(me int) {
-	rf.matchIndex[rf.me] = len(rf.log) - 1
+	rf.matchIndex[rf.me] = len(rf.log) - 1 + rf.lastIncludedIndex
 	copyMatchIndex := make([]int, len(rf.matchIndex))
 	copy(copyMatchIndex, rf.matchIndex)
 	sort.Slice(copyMatchIndex, func(i int, j int) bool {
 		return copyMatchIndex[i] > copyMatchIndex[j]
 	})
 	N := copyMatchIndex[len(copyMatchIndex)/2]
-	if N > rf.commitIndex && rf.log[N].Term == rf.currentTerm {
+	if N > rf.commitIndex && N > rf.lastIncludedIndex &&
+		rf.getLogEntry(N).Term == rf.currentTerm {
 		rf.commitIndex = N
-		DPrintln("leader ", me, " have updated commitIndex,log length", len(rf.log), "now commitIndex is ", N)
+		DPrintln("leader ", me, " have updated commitIndex,log length", rf.getLogLen(),
+			"now commitIndex is ", N)
 		rf.updateLastApplied()
 	}
 }

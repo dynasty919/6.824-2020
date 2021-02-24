@@ -9,8 +9,8 @@ func (rf *Raft) Candidate(me int, peers []*labrpc.ClientEnd) {
 	args := RequestVoteArgs{
 		Term:         rf.currentTerm,
 		CandidateId:  me,
-		LastLogIndex: len(rf.log) - 1,
-		LastLogTerm:  rf.log[len(rf.log)-1].Term,
+		LastLogIndex: rf.getLastLogIndex(),
+		LastLogTerm:  rf.getLastLogTerm(),
 	}
 
 	DPrintln("candidate ", me, " start to hold election , has term ", term)
