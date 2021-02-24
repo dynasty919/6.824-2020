@@ -105,7 +105,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	return
 }
 
-func (rf *Raft) InstallSnapShot(args SendSnapshotArg, reply SendSnapshotReply) {
+func (rf *Raft) InstallSnapshot(args SendSnapshotArg, reply SendSnapshotReply) {
+	DPrintln(fmt.Sprintf("server %d receive install snapshot attempt from leader %d", rf.me, args.LeaderId) +
+		fmt.Sprintf("attemp has LastIncludedIndex %d, LastIncludedTerm %d",
+			args.LastIncludedIndex, args.LastIncludedTerm))
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -150,6 +153,8 @@ func (rf *Raft) InstallSnapShot(args SendSnapshotArg, reply SendSnapshotReply) {
 	rf.commitIndex = max(rf.commitIndex, rf.lastIncludedIndex)
 	rf.lastApplied = max(rf.lastApplied, rf.lastIncludedIndex)
 
+	DPrintln(fmt.Sprintf("server %d has shorten its log, now lastIncludedIndex %d, lastIncludedTerm %d, log is %v ",
+		rf.me, rf.lastIncludedIndex, rf.lastIncludedTerm, rf.log))
 	rf.persistWithSnapshot(args.Data)
 
 	if args.LastIncludedIndex < rf.lastApplied {

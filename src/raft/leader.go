@@ -78,6 +78,7 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int, 
 			rf.matchIndex[peerId] = args.PrevLogIndex + len(args.Entries)
 			rf.updateCommitIndex(me)
 		} else {
+			DPrintln("fuckfuckfuck")
 			//tarIndex := reply.FirstIndexOfLastLogTerm //If it does not find an entry with that term
 			//if reply.LastLogTerm != -1 {
 			//	logSize := len(rf.log) //first search its log for conflictTerm

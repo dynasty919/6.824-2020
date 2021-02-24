@@ -8,8 +8,9 @@ import (
 
 func (kv *KVServer) needSnapShot() bool {
 	proportion := 10
-	DPrintf("%d", kv.persister.RaftStateSize())
+
 	if kv.maxraftstate > 0 && kv.maxraftstate-kv.persister.RaftStateSize() < kv.maxraftstate/proportion {
+		DPrintf("%d!!!", kv.persister.RaftStateSize())
 		return true
 	} else {
 		return false

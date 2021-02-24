@@ -195,6 +195,7 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 	var unAppliedQueue []*Op
 
 	for {
+
 		select {
 		case <-kv.killChan:
 			return

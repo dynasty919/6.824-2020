@@ -8,7 +8,7 @@ import (
 )
 
 // Debugging
-const Debug = 1
+const Debug = 0
 
 func DPrintln(a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -121,7 +121,7 @@ func (rf *Raft) getLastLogIndex() int {
 }
 
 func (rf *Raft) getLastLogTerm() int {
-	return rf.log[rf.getLastLogIndex()].Term
+	return rf.getLogEntry(rf.getLastLogIndex()).Term
 }
 
 func (rf *Raft) getLogEntry(i int) LogEntry {
@@ -144,7 +144,7 @@ func (rf *Raft) turnLeader(me int, peersNum int) {
 	rf.resetElectionTimer()
 	rf.nextIndex = make([]int, peersNum)
 	for i := 0; i < len(rf.nextIndex); i++ {
-		rf.nextIndex[i] = len(rf.log) + rf.lastIncludedIndex
+		rf.nextIndex[i] = rf.getLastLogIndex() + 1
 	}
 	rf.matchIndex = make([]int, peersNum)
 	for i := 0; i < len(rf.matchIndex); i++ {

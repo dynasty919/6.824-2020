@@ -11,11 +11,10 @@ import (
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	DPrintln(fmt.Sprintf("leader %d receive snapshot request index %d from kv server!!!", rf.me, index))
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	DPrintln(fmt.Sprintf("leader %d receive snapshot request has log %v", rf.me, rf.log))
+	DPrintln(fmt.Sprintf("server %d receive snapshot request from kv server index %d!!!", rf.me, index))
 
 	if index <= rf.lastIncludedIndex {
 		DPrintln("snapshot trim index <= lastIncludedIndex of server", rf.me)
@@ -30,10 +29,14 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.lastIncludedIndex = index
 	rf.lastIncludedTerm = rf.getLogEntry(index).Term
 
+	DPrintln(fmt.Sprintf("server %d has shorten its log, now lastIncludedIndex %d, lastIncludedTerm %d, log is %v ",
+		rf.me, rf.lastIncludedIndex, rf.lastIncludedTerm, rf.log))
 	rf.persistWithSnapshot(snapshot)
 }
 
 func (rf *Raft) sendSnapshotToPeer(peer *labrpc.ClientEnd, me int, peerId int, curTerm int) {
+	DPrintln(fmt.Sprintf("leader %d is sending snapshot to %d, nextIndex of %d is %d, lastIncludedIndex is %d",
+		rf.me, peerId, peerId, rf.nextIndex[peerId], rf.lastIncludedIndex))
 	args := SendSnapshotArg{
 		Term:              curTerm,
 		LeaderId:          me,
@@ -44,7 +47,7 @@ func (rf *Raft) sendSnapshotToPeer(peer *labrpc.ClientEnd, me int, peerId int, c
 	reply := SendSnapshotReply{}
 	rf.mu.Unlock()
 
-	suc := peer.Call("Raft.InstallSnapShot", &args, &reply)
+	suc := peer.Call("Raft.InstallSnapshot", &args, &reply)
 
 	rf.mu.Lock()
 	if !suc || rf.state != leader || rf.currentTerm != args.Term {
@@ -65,4 +68,11 @@ func (rf *Raft) sendSnapshotToPeer(peer *labrpc.ClientEnd, me int, peerId int, c
 func (rf *Raft) persistWithSnapshot(snapshot []byte) {
 	rf.persist()
 	rf.persister.SaveStateAndSnapshot(rf.persister.raftstate, snapshot)
+}
+
+func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
+
+	// Your code here (2D).
+
+	return true
 }
