@@ -341,7 +341,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	DPrintln("test is starting server ", me, "log length", rf.getLogLen(), "last log entry", rf.getLogEntry(rf.getLastLogIndex()),
 		"term", rf.currentTerm, " commitIndex", rf.commitIndex,
-		"last applied", rf.lastApplied)
+		"last applied", rf.lastApplied, "lastIncludedIndex", rf.lastIncludedIndex,
+		"lastIncluded Term", rf.lastIncludedTerm)
 	go rf.Run(me, peers)
 
 	return rf

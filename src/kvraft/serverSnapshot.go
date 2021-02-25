@@ -21,12 +21,12 @@ func (kv *KVServer) createSnapShot(index int) {
 	e := labgob.NewEncoder(w)
 	e.Encode(kv.db)
 	e.Encode(kv.applied)
-	DPrintf("server %d is creating and sending snapshot!!!!!!!", kv.me)
+	DPrintf("server %d is creating and sending snapshot, now db is %v!!!!!!!", kv.me, kv.db)
 	go kv.rf.Snapshot(index, w.Bytes())
 }
 
 func (kv *KVServer) LoadSnapShot(snapshot []byte) {
-	DPrintf("server %d is loading snapshot", kv.me)
+	DPrintf("server %d is about to load snapshot, before snapshot db is %v", kv.me, kv.db)
 	if snapshot == nil || len(snapshot) == 0 {
 		return
 	}
@@ -40,4 +40,5 @@ func (kv *KVServer) LoadSnapShot(snapshot []byte) {
 		kv.db = db
 		kv.applied = applied
 	}
+	DPrintf("kv server %d has loaded snapshot now db is %v", kv.me, kv.db)
 }

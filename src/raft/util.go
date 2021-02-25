@@ -154,7 +154,9 @@ func (rf *Raft) turnLeader(me int, peersNum int) {
 	curTerm := rf.currentTerm
 	votedFor := rf.votedFor
 	entry := rf.log
-	DPrintln("new elected leader ", me, "have term of ", curTerm, " voted for ", votedFor, "has log ", entry)
+	DPrintln("new elected leader ", me, "have term of ", curTerm, " voted for ", votedFor,
+		"lastIncludedIndex ", rf.lastIncludedIndex, "lastIncludedTerm ", rf.lastIncludedTerm,
+		"has log ", entry)
 }
 
 func (rf *Raft) turnCandidate(me int) {

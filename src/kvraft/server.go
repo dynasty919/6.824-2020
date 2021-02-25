@@ -239,9 +239,6 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 	maxraftstate int, unAppliedQueuePtr *[]*Op, msg *raft.ApplyMsg) {
 	commandIndex := msg.CommandIndex
-	if kv.needSnapShot() {
-		kv.createSnapShot(commandIndex)
-	}
 	b := bytes.NewBuffer(msg.Command.([]byte))
 	d := labgob.NewDecoder(b)
 	var origin, index int
@@ -286,6 +283,10 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 				res = v
 			}
 			DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, res, (*unAppliedQueuePtr))
+		}
+
+		if kv.needSnapShot() {
+			kv.createSnapShot(commandIndex)
 		}
 
 		if len((*unAppliedQueuePtr)) > 0 && (*unAppliedQueuePtr)[0].RaftCommandIndex == msg.CommandIndex {
