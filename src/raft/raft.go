@@ -244,20 +244,38 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
+	//rf.mu.Lock()
+	//defer rf.mu.Unlock()
+	//index := -1
+	//term := rf.currentTerm
+	//isLeader := (rf.state == leader)
+	////If command received from client: append entry to local log, respond after entry applied to state machine (§5.3)
+	//if isLeader {
+	//	index = rf.getLastLogIndex() + 1
+	//	newLog := LogEntry{
+	//		command,
+	//		rf.currentTerm,
+	//	}
+	//	rf.log = append(rf.log, newLog)
+	//	rf.persist()
+	////	rf.Leader(rf.me, rf.peers, rf.currentTerm)
+	//}
+	//return index, term, isLeader
 
 	// Your code here (2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	index := -1
+	term := rf.currentTerm
+	isLeader := rf.state == leader
 
 	me := rf.me
 	DPrintln("!!!!!!!")
 
 	if rf.state != leader || rf.killed() {
 		DPrintln("server ", me, "fail to receive the command", command, " because it is killed or not leader")
-		return 0, 0, false
+		return index, term, isLeader
 	}
 
 	rf.log = append(rf.log, LogEntry{
@@ -266,9 +284,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	})
 	rf.persist()
 
-	index = rf.getLogLen() - 1
-	term = rf.currentTerm
-	isLeader = true
+	index = rf.getLastLogIndex()
 
 	DPrintln("client send to leader ", me, "command", command, "commandIndex", index, "term", term)
 	return index, term, isLeader
@@ -341,7 +357,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.readPersist(persister.ReadRaftState())
 
 	// initialize from state persisted before a crash
-	DPrintln("test is starting server ", me, "log length", len(rf.log), "last log entry", rf.log[len(rf.log)-1],
+	DPrintln("test is starting server ", me, "log length", rf.getLogLen(), "last log entry", rf.getLogEntry(rf.getLastLogIndex()),
 		"term", rf.currentTerm, " commitIndex", rf.commitIndex,
 		"last applied", rf.lastApplied)
 	go rf.Run(me, peers)
@@ -350,8 +366,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 }
 
 func (rf *Raft) Run(me int, peers []*labrpc.ClientEnd) {
-
-	//	go rf.logApplyKicker(me)
 
 	rf.mu.Lock()
 	heartBeat := rf.heartBeatTimer

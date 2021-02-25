@@ -57,9 +57,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.chSender(rf.appendLogCh)
 
-	if args.Term > rf.currentTerm {
-		rf.turnFollower(args.Term, -1)
-	}
+	//if args.Term > rf.currentTerm {
+	//	rf.turnFollower(args.Term, -1)
+	//}
 
 	lastOldEntryIndex := rf.getLastLogIndex()
 
@@ -105,10 +105,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	return
 }
 
-func (rf *Raft) InstallSnapshot(args SendSnapshotArg, reply SendSnapshotReply) {
-	DPrintln(fmt.Sprintf("server %d receive install snapshot attempt from leader %d", rf.me, args.LeaderId) +
-		fmt.Sprintf("attemp has LastIncludedIndex %d, LastIncludedTerm %d",
-			args.LastIncludedIndex, args.LastIncludedTerm))
+func (rf *Raft) InstallSnapshot(args *SendSnapshotArg, reply *SendSnapshotReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 

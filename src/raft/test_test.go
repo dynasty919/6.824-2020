@@ -8,12 +8,14 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
-import "fmt"
-import "time"
-import "math/rand"
-import "sync/atomic"
-import "sync"
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -1033,15 +1035,18 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 			cfg.disconnect(victim)
 			cfg.one(rand.Int(), servers-1, true)
 		}
+
 		if crash {
 			cfg.crash1(victim)
 			cfg.one(rand.Int(), servers-1, true)
 		}
 		// send enough to get a snapshot
+		fmt.Println("send enough to get a snapshot")
 		for i := 0; i < SnapShotInterval+1; i++ {
 			cfg.rafts[sender].Start(rand.Int())
 		}
 		// let applier threads catch up with the Start()'s
+		fmt.Println("let applier threads catch up with the Start()'s")
 		cfg.one(rand.Int(), servers-1, true)
 
 		if cfg.LogSize() >= MAXLOGSIZE {
@@ -1050,9 +1055,13 @@ func snapcommon(t *testing.T, name string, disconnect bool, reliable bool, crash
 		if disconnect {
 			// reconnect a follower, who maybe behind and
 			// needs to rceive a snapshot to catch up.
+			fmt.Println("reconnect a follower, who maybe behind and needs to rceive a snapshot to catch up.")
 			cfg.connect(victim)
+			fmt.Println("cfg.one")
 			cfg.one(rand.Int(), servers, true)
+			fmt.Println("cfg.checkOneLeader")
 			leader1 = cfg.checkOneLeader()
+
 		}
 		if crash {
 			cfg.start1(victim, cfg.applierSnap)

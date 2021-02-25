@@ -44,11 +44,11 @@ func (rf *Raft) sendSnapshotToPeer(peer *labrpc.ClientEnd, me int, peerId int, c
 		LastIncludedTerm:  rf.lastIncludedTerm,
 		Data:              rf.persister.ReadSnapshot(),
 	}
-	reply := SendSnapshotReply{}
 	rf.mu.Unlock()
-
-	suc := peer.Call("Raft.InstallSnapshot", &args, &reply)
-
+	reply := SendSnapshotReply{}
+	DPrintln("__________________")
+	suc := rf.sendInstallSnapshot(peer, &args, &reply)
+	DPrintln("~~~~~~~~~~~~~~~~~~")
 	rf.mu.Lock()
 	if !suc || rf.state != leader || rf.currentTerm != args.Term {
 		DPrintln(fmt.Sprintf("leader %d 's send snapshop RPC to %d failed or unexecuted", me, peerId))
@@ -75,4 +75,9 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// Your code here (2D).
 
 	return true
+}
+
+func (rf *Raft) sendInstallSnapshot(peer *labrpc.ClientEnd, args *SendSnapshotArg, reply *SendSnapshotReply) bool {
+	ok := peer.Call("Raft.InstallSnapshot", args, reply)
+	return ok
 }

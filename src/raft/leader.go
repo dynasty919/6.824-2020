@@ -79,16 +79,7 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int, 
 			rf.updateCommitIndex(me)
 		} else {
 			DPrintln("fuckfuckfuck")
-			//tarIndex := reply.FirstIndexOfLastLogTerm //If it does not find an entry with that term
-			//if reply.LastLogTerm != -1 {
-			//	logSize := len(rf.log) //first search its log for conflictTerm
-			//	for i := 0; i < logSize; i++ {//if it finds an entry in its log with that term,
-			//		if rf.log[i].Term != reply.LastLogTerm { continue }
-			//		for i < logSize && rf.log[i].Term == reply.LastLogTerm { i++ }//set nextIndex to be the one
-			//		tarIndex = i //beyond the index of the last entry in that term in its log
-			//	}
-			//}
-			//rf.nextIndex[peerId] = tarIndex
+
 			if reply.LastLogTerm == -1 {
 				//[4],[4,6,6,6]
 				rf.nextIndex[peerId] = reply.FirstIndexOfLastLogTerm + 1
@@ -107,15 +98,14 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int, 
 }
 
 func (rf *Raft) updateCommitIndex(me int) {
-	rf.matchIndex[rf.me] = len(rf.log) - 1 + rf.lastIncludedIndex
+	rf.matchIndex[rf.me] = rf.getLastLogIndex()
 	copyMatchIndex := make([]int, len(rf.matchIndex))
 	copy(copyMatchIndex, rf.matchIndex)
 	sort.Slice(copyMatchIndex, func(i int, j int) bool {
 		return copyMatchIndex[i] > copyMatchIndex[j]
 	})
 	N := copyMatchIndex[len(copyMatchIndex)/2]
-	if N > rf.commitIndex && N > rf.lastIncludedIndex &&
-		rf.getLogEntry(N).Term == rf.currentTerm {
+	if N > rf.commitIndex && rf.getLogEntry(N).Term == rf.currentTerm {
 		rf.commitIndex = N
 		DPrintln("leader ", me, " have updated commitIndex,log length", rf.getLogLen(),
 			"now commitIndex is ", N)
