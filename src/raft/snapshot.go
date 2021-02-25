@@ -71,9 +71,7 @@ func (rf *Raft) persistWithSnapshot(snapshot []byte) {
 }
 
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-
 	// Your code here (2D).
-
 	return true
 }
 

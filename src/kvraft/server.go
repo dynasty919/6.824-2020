@@ -184,8 +184,8 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 				op.Reply.WriteError("server " + strconv.Itoa(me) + " is not leader")
 				op.Done <- struct{}{}
 			} else {
-				DPrintf("server %d believe it is leader, operation sent to queue, have server index %d!!!",
-					me, op.IndexInServer)
+				DPrintf("server %d believe it is leader, operation sent to queue, ClientOpId %s!!!",
+					me, op.ClientOpId)
 				op.RaftCommandIndex = commandIndex
 				kv.unApplied <- op
 			}

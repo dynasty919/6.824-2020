@@ -150,12 +150,13 @@ func (rf *Raft) InstallSnapshot(args *SendSnapshotArg, reply *SendSnapshotReply)
 	rf.lastIncludedIndex = args.LastIncludedIndex
 	rf.lastIncludedTerm = args.LastIncludedTerm
 
+	rf.persistWithSnapshot(args.Data)
+
 	rf.commitIndex = max(rf.commitIndex, rf.lastIncludedIndex)
 	rf.lastApplied = max(rf.lastApplied, rf.lastIncludedIndex)
 
 	DPrintln(fmt.Sprintf("server %d has shorten its log, now lastIncludedIndex %d, lastIncludedTerm %d, log is %v ",
 		rf.me, rf.lastIncludedIndex, rf.lastIncludedTerm, rf.log))
-	rf.persistWithSnapshot(args.Data)
 
 	if args.LastIncludedIndex < rf.lastApplied {
 		return

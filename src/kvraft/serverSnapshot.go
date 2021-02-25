@@ -27,7 +27,7 @@ func (kv *KVServer) createSnapShot(index int) {
 
 func (kv *KVServer) LoadSnapShot(snapshot []byte) {
 	DPrintf("server %d is loading snapshot", kv.me)
-	if len(snapshot) == 0 {
+	if snapshot == nil || len(snapshot) == 0 {
 		return
 	}
 	r := bytes.NewBuffer(snapshot)
