@@ -1,6 +1,10 @@
 package kvraft
 
-import "log"
+import (
+	"log"
+	"strconv"
+	"strings"
+)
 
 const (
 	OK             = "OK"
@@ -26,10 +30,11 @@ type OpReply interface {
 
 // Put or Append
 type PutAppendArgs struct {
-	Key   string
-	Value string
-	Op    string // "Put" or "Append"
-	NRand int64
+	Key        string
+	Value      string
+	Op         string // "Put" or "Append"
+	ClientId   int64
+	ClientOpId string
 	// You'll have to add definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
@@ -41,8 +46,9 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Key   string
-	NRand int64
+	Key        string
+	ClientId   int64
+	ClientOpId string
 	// You'll have to add definitions here.
 }
 
@@ -73,4 +79,18 @@ func (reply *GetReply) WriteError(e string) {
 
 func (reply *GetReply) WriteVal(val string) {
 	reply.Value = val
+}
+
+func isClientOpIdLarger(id1 string, id2 string) bool {
+	a := strings.Split(id1, ",")
+	b := strings.Split(id2, ",")
+	if a[0] != b[0] {
+		panic("op from different clients compared")
+	}
+	c, err1 := strconv.Atoi(a[1])
+	d, err2 := strconv.Atoi(b[1])
+	if err1 != nil || err2 != nil {
+		panic("atoi error")
+	}
+	return c > d
 }

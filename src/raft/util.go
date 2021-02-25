@@ -96,9 +96,9 @@ func (rf *Raft) updateLastApplied() {
 			CommandIndex: rf.lastApplied,
 			Snapshot:     nil,
 		}
-		rf.mu.Unlock()
+		//	rf.mu.Unlock()
 		rf.applyChan <- applyMsg
-		rf.mu.Lock()
+		//	rf.mu.Lock()
 	}
 }
 

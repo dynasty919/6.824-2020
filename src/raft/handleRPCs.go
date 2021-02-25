@@ -57,9 +57,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf.chSender(rf.appendLogCh)
 
-	//if args.Term > rf.currentTerm {
-	//	rf.turnFollower(args.Term, -1)
-	//}
+	if args.Term > rf.currentTerm {
+		rf.turnFollower(args.Term, -1)
+	}
 
 	lastOldEntryIndex := rf.getLastLogIndex()
 
@@ -129,10 +129,13 @@ func (rf *Raft) InstallSnapshot(args *SendSnapshotArg, reply *SendSnapshotReply)
 	}
 
 	msg := ApplyMsg{
-		CommandValid: false,
-		Command:      nil,
-		CommandIndex: 0,
-		Snapshot:     args.Data,
+		CommandValid:  false,
+		Command:       nil,
+		CommandIndex:  0,
+		Snapshot:      args.Data,
+		SnapshotValid: true,
+		SnapshotIndex: args.LastIncludedIndex,
+		SnapshotTerm:  args.LastIncludedTerm,
 	}
 
 	if args.LastIncludedIndex <= rf.getLastLogIndex() {

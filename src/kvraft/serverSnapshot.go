@@ -10,7 +10,6 @@ func (kv *KVServer) needSnapShot() bool {
 	proportion := 10
 
 	if kv.maxraftstate > 0 && kv.maxraftstate-kv.persister.RaftStateSize() < kv.maxraftstate/proportion {
-		DPrintf("%d!!!", kv.persister.RaftStateSize())
 		return true
 	} else {
 		return false
@@ -34,7 +33,7 @@ func (kv *KVServer) LoadSnapShot(snapshot []byte) {
 	r := bytes.NewBuffer(snapshot)
 	d := labgob.NewDecoder(r)
 	var db map[string]string
-	var applied map[int64]struct{}
+	var applied map[int64]string
 	if d.Decode(&db) != nil || d.Decode(&applied) != nil {
 		DPrintf("labgob decode error loading snapshot in server %d", kv.me)
 	} else {

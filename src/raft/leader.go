@@ -78,7 +78,10 @@ func (rf *Raft) sendHeartBeatToPeer(peer *labrpc.ClientEnd, me int, peerId int, 
 			rf.matchIndex[peerId] = args.PrevLogIndex + len(args.Entries)
 			rf.updateCommitIndex(me)
 		} else {
-			DPrintln("fuckfuckfuck")
+			DPrintln("leader ", me, "'s heart beat sender to ", peerId,
+				" failed due to conflict entry", "reply.LastLogTerm is ", reply.LastLogTerm,
+				" reply.FirstIndexOfLastLogTerm is ", reply.FirstIndexOfLastLogTerm,
+				"log is", rf.log, "lastIncludedIndex is", rf.lastIncludedIndex)
 
 			if reply.LastLogTerm == -1 {
 				//[4],[4,6,6,6]

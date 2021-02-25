@@ -20,12 +20,13 @@ type Op struct {
 	Operation        string
 	Key              string
 	Value            string
-	NRand            int64
 	Reply            OpReply
 	Done             chan struct{}
 	OriginServer     int
 	IndexInServer    int
 	RaftCommandIndex int
+	ClientId         int64
+	ClientOpId       string
 }
 
 type KVServer struct {
@@ -43,7 +44,7 @@ type KVServer struct {
 	killChan  chan struct{}
 
 	db      map[string]string
-	applied map[int64]struct{}
+	applied map[int64]string
 
 	persister *raft.Persister
 }
@@ -54,14 +55,16 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 	done := make(chan struct{})
 	kv.opChan <- &Op{
-		Operation: "Get",
-		Key:       args.Key,
-		NRand:     args.NRand,
-		Reply:     reply,
-		Done:      done,
+		Operation:  "Get",
+		Key:        args.Key,
+		ClientId:   args.ClientId,
+		ClientOpId: args.ClientOpId,
+		Reply:      reply,
+		Done:       done,
 	}
 	reply.Server = kv.me
-	DPrintf("server %d receive Get RPC from client with key %s NRand %d", kv.me, args.Key, args.NRand)
+	DPrintf("server %d receive Get RPC from client with key %s ClientOpId %s",
+		kv.me, args.Key, args.ClientOpId)
 	<-done
 }
 
@@ -70,16 +73,17 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	done := make(chan struct{})
 	kv.opChan <- &Op{
-		Operation: args.Op,
-		Key:       args.Key,
-		Value:     args.Value,
-		NRand:     args.NRand,
-		Reply:     reply,
-		Done:      done,
+		Operation:  args.Op,
+		Key:        args.Key,
+		Value:      args.Value,
+		ClientId:   args.ClientId,
+		ClientOpId: args.ClientOpId,
+		Reply:      reply,
+		Done:       done,
 	}
 	reply.Server = kv.me
-	DPrintf("server %d receive %s RPC from client with key %s , value %s ,NRand %d ",
-		kv.me, args.Op, args.Key, args.Value, args.NRand)
+	DPrintf("server %d receive %s RPC from client with key %s , value %s ,ClientOpId %s ",
+		kv.me, args.Op, args.Key, args.Value, args.ClientOpId)
 	<-done
 }
 
@@ -140,7 +144,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.opChan = make(chan *Op)
 	kv.unApplied = make(chan *Op)
 	kv.db = make(map[string]string)
-	kv.applied = make(map[int64]struct{})
+	kv.applied = make(map[int64]string)
 	kv.persister = persister
 	kv.LoadSnapShot(kv.persister.ReadSnapshot())
 
@@ -170,7 +174,8 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 			e := labgob.NewEncoder(b)
 			e.Encode(op.OriginServer)
 			e.Encode(op.IndexInServer)
-			e.Encode(op.NRand)
+			e.Encode(op.ClientId)
+			e.Encode(op.ClientOpId)
 			e.Encode(op.Operation)
 			e.Encode(op.Key)
 			e.Encode(op.Value)
@@ -220,10 +225,10 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 			} else {
 				DPrintf("server " + strconv.Itoa(me) + " timeout waiting for a reply from raft" +
 					", index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) +
-					", NRand" + strconv.Itoa(int(unAppliedQueue[0].NRand)) + " abandoned")
+					", ClientOpId" + unAppliedQueue[0].ClientOpId + " abandoned")
 				unAppliedQueue[0].Reply.WriteError("server " + strconv.Itoa(me) + " timeout waiting for a reply from raft" +
 					", index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) +
-					", NRand" + strconv.Itoa(int(unAppliedQueue[0].NRand)) + " abandoned")
+					", ClientOpId" + unAppliedQueue[0].ClientOpId + " abandoned")
 				unAppliedQueue[0].Done <- struct{}{}
 				unAppliedQueue = unAppliedQueue[1:]
 			}
@@ -240,21 +245,23 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 	b := bytes.NewBuffer(msg.Command.([]byte))
 	d := labgob.NewDecoder(b)
 	var origin, index int
-	var NRand int64
+	var clientId int64
+	var clientOpId string
 	var operation, key, value string
-	if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&NRand) != nil ||
+	if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&clientId) != nil ||
+		d.Decode(&clientOpId) != nil ||
 		d.Decode(&operation) != nil || d.Decode(&key) != nil || d.Decode(&value) != nil {
 		log.Fatalf("labgob decode error in server %d", me)
 		DPrintf("labgob decode error in server %d", me)
 	} else {
 		DPrintf("incoming msg from applyCh in state machine of server %d of commandIndex %d,"+
-			"origin:%d, index:%d, NRand:%d, operation:%s, key:%s, value:%s, queue:%v",
-			me, msg.CommandIndex, origin, index, NRand, operation, key, value, (*unAppliedQueuePtr))
+			"origin:%d, index:%d, clientOpId:%s, operation:%s, key:%s, value:%s, queue:%v",
+			me, msg.CommandIndex, origin, index, clientOpId, operation, key, value, (*unAppliedQueuePtr))
 
-		_, ok := kv.applied[NRand]
+		cur, ok := kv.applied[clientId]
 
-		if !ok {
-			kv.applied[NRand] = struct{}{}
+		if !ok || isClientOpIdLarger(clientOpId, cur) {
+			kv.applied[clientId] = clientOpId
 			if operation == "Put" {
 				kv.db[key] = value
 				DPrintf("server %d has %s key %s with value %s, queue %v",
@@ -269,7 +276,8 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 					me, operation, key, value, (*unAppliedQueuePtr))
 			}
 		} else {
-			DPrintf("server %d has abandoned duplicated PutAppend operation NRand %d", me, NRand)
+			DPrintf("server %d has abandoned duplicated PutAppend operation clientOpId %s",
+				me, clientOpId)
 		}
 
 		res := ""
@@ -281,10 +289,10 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 		}
 
 		if len((*unAppliedQueuePtr)) > 0 && (*unAppliedQueuePtr)[0].RaftCommandIndex == msg.CommandIndex {
-			if (*unAppliedQueuePtr)[0].NRand != NRand || origin != me {
-				DPrintf("operation of NRand %d failed probably due to server "+strconv.Itoa(me)+
+			if (*unAppliedQueuePtr)[0].ClientOpId != clientOpId || origin != me {
+				DPrintf("operation of clientOpId %s failed probably due to server "+strconv.Itoa(me)+
 					" is no longer leader, index "+strconv.Itoa((*unAppliedQueuePtr)[0].IndexInServer)+" abandoned",
-					NRand)
+					clientOpId)
 				(*unAppliedQueuePtr)[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
 					" is no longer leader, index " + strconv.Itoa((*unAppliedQueuePtr)[0].IndexInServer) + " abandoned")
 				(*unAppliedQueuePtr)[0].Done <- struct{}{}
@@ -293,10 +301,10 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 		}
 
 		if origin == me {
-			if len((*unAppliedQueuePtr)) == 0 || (*unAppliedQueuePtr)[0].NRand != NRand {
-				DPrintf("incoming operation of NRand %d to server "+strconv.Itoa(me)+
+			if len((*unAppliedQueuePtr)) == 0 || (*unAppliedQueuePtr)[0].ClientOpId != clientOpId {
+				DPrintf("incoming operation of clientOpId %s to server "+strconv.Itoa(me)+
 					" may has been re-executed or is outdated and dumped, queue %v",
-					NRand, (*unAppliedQueuePtr))
+					clientOpId, (*unAppliedQueuePtr))
 				return
 			}
 
