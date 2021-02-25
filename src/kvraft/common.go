@@ -94,3 +94,11 @@ func isClientOpIdLarger(id1 string, id2 string) bool {
 	}
 	return c > d
 }
+
+func PopAndDone(queue *[]*Op) {
+	if len(*queue) == 0 {
+		panic("trying to pop an empty queue")
+	}
+	(*queue)[0].Done <- struct{}{}
+	(*queue) = (*queue)[1:]
+}

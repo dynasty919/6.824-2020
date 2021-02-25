@@ -23,7 +23,6 @@ type Op struct {
 	Reply            OpReply
 	Done             chan struct{}
 	OriginServer     int
-	IndexInServer    int
 	RaftCommandIndex int
 	ClientId         int64
 	ClientOpId       string
@@ -157,7 +156,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 }
 
 func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
-	i := 1
 	for {
 		select {
 		case <-kv.killChan:
@@ -168,12 +166,9 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 		select {
 		case op := <-kv.opChan:
 			op.OriginServer = me
-			op.IndexInServer = i
-			i++
 			b := new(bytes.Buffer)
 			e := labgob.NewEncoder(b)
 			e.Encode(op.OriginServer)
-			e.Encode(op.IndexInServer)
 			e.Encode(op.ClientId)
 			e.Encode(op.ClientOpId)
 			e.Encode(op.Operation)
@@ -195,8 +190,6 @@ func (kv *KVServer) Run(me int, persister *raft.Persister, maxraftstate int) {
 
 func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate int) {
 
-	//	dict := make(map[string]string)
-	//	applied := make(map[int64]struct{})
 	var unAppliedQueue []*Op
 
 	for {
@@ -224,13 +217,11 @@ func (kv *KVServer) StateMachine(me int, persister *raft.Persister, maxraftstate
 				continue
 			} else {
 				DPrintf("server " + strconv.Itoa(me) + " timeout waiting for a reply from raft" +
-					", index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) +
 					", ClientOpId" + unAppliedQueue[0].ClientOpId + " abandoned")
-				unAppliedQueue[0].Reply.WriteError("server " + strconv.Itoa(me) + " timeout waiting for a reply from raft" +
-					", index " + strconv.Itoa(unAppliedQueue[0].IndexInServer) +
+				unAppliedQueue[0].Reply.WriteError("server " + strconv.Itoa(me) +
+					" timeout waiting for a reply from raft" +
 					", ClientOpId" + unAppliedQueue[0].ClientOpId + " abandoned")
-				unAppliedQueue[0].Done <- struct{}{}
-				unAppliedQueue = unAppliedQueue[1:]
+				PopAndDone(&unAppliedQueue)
 			}
 		}
 	}
@@ -241,19 +232,19 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 	commandIndex := msg.CommandIndex
 	b := bytes.NewBuffer(msg.Command.([]byte))
 	d := labgob.NewDecoder(b)
-	var origin, index int
+	var origin int
 	var clientId int64
 	var clientOpId string
 	var operation, key, value string
-	if d.Decode(&origin) != nil || d.Decode(&index) != nil || d.Decode(&clientId) != nil ||
+	if d.Decode(&origin) != nil || d.Decode(&clientId) != nil ||
 		d.Decode(&clientOpId) != nil ||
 		d.Decode(&operation) != nil || d.Decode(&key) != nil || d.Decode(&value) != nil {
 		log.Fatalf("labgob decode error in server %d", me)
 		DPrintf("labgob decode error in server %d", me)
 	} else {
 		DPrintf("incoming msg from applyCh in state machine of server %d of commandIndex %d,"+
-			"origin:%d, index:%d, clientOpId:%s, operation:%s, key:%s, value:%s, queue:%v",
-			me, msg.CommandIndex, origin, index, clientOpId, operation, key, value, (*unAppliedQueuePtr))
+			"origin:%d, clientOpId:%s, operation:%s, key:%s, value:%s, queue:%v",
+			me, msg.CommandIndex, origin, clientOpId, operation, key, value, (*unAppliedQueuePtr))
 
 		cur, ok := kv.applied[clientId]
 
@@ -292,12 +283,11 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 		if len((*unAppliedQueuePtr)) > 0 && (*unAppliedQueuePtr)[0].RaftCommandIndex == msg.CommandIndex {
 			if (*unAppliedQueuePtr)[0].ClientOpId != clientOpId || origin != me {
 				DPrintf("operation of clientOpId %s failed probably due to server "+strconv.Itoa(me)+
-					" is no longer leader, index "+strconv.Itoa((*unAppliedQueuePtr)[0].IndexInServer)+" abandoned",
+					" is no longer leader, clientOpId "+(*unAppliedQueuePtr)[0].ClientOpId+" abandoned",
 					clientOpId)
 				(*unAppliedQueuePtr)[0].Reply.WriteError("operation failed probably due to server " + strconv.Itoa(me) +
-					" is no longer leader, index " + strconv.Itoa((*unAppliedQueuePtr)[0].IndexInServer) + " abandoned")
-				(*unAppliedQueuePtr)[0].Done <- struct{}{}
-				(*unAppliedQueuePtr) = (*unAppliedQueuePtr)[1:]
+					" is no longer leader, clientOpId " + (*unAppliedQueuePtr)[0].ClientOpId + " abandoned")
+				PopAndDone(unAppliedQueuePtr)
 			}
 		}
 
@@ -312,8 +302,7 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 			if operation == "Get" {
 				(*unAppliedQueuePtr)[0].Reply.WriteVal(res)
 			}
-			(*unAppliedQueuePtr)[0].Done <- struct{}{}
-			(*unAppliedQueuePtr) = (*unAppliedQueuePtr)[1:]
+			PopAndDone(unAppliedQueuePtr)
 		}
 	}
 }

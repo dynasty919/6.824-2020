@@ -264,7 +264,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Term:  rf.currentTerm,
 	})
 	rf.persist()
-	//	rf.Leader(rf.me, rf.peers, rf.currentTerm)
+	rf.Leader(rf.me, rf.peers, rf.currentTerm)
 
 	index = rf.getLastLogIndex()
 
