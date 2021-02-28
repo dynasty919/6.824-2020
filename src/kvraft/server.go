@@ -41,11 +41,10 @@ type KVServer struct {
 	opChan    chan *Op
 	unApplied chan *Op
 	killChan  chan struct{}
+	persister *raft.Persister
 
 	db      map[string]string
 	applied map[int64]string
-
-	persister *raft.Persister
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -247,8 +246,8 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 			me, msg.CommandIndex, origin, clientOpId, operation, key, value, (*unAppliedQueuePtr))
 
 		cur, ok := kv.applied[clientId]
-
-		if !ok || isClientOpIdLarger(clientOpId, cur) {
+		res := ""
+		if !ok || isClientOpIdLarger(clientOpId, cur) || operation == "Get" {
 			kv.applied[clientId] = clientOpId
 			if operation == "Put" {
 				kv.db[key] = value
@@ -262,18 +261,15 @@ func (kv *KVServer) ApplyCommand(me int, persister *raft.Persister,
 				}
 				DPrintf("server %d has %s key %s with value %s, queue %v",
 					me, operation, key, value, (*unAppliedQueuePtr))
+			} else if operation == "Get" {
+				if v, ok := kv.db[key]; ok {
+					res = v
+				}
+				DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, res, (*unAppliedQueuePtr))
 			}
 		} else {
 			DPrintf("server %d has abandoned duplicated PutAppend operation clientOpId %s",
 				me, clientOpId)
-		}
-
-		res := ""
-		if operation == "Get" {
-			if v, ok := kv.db[key]; ok {
-				res = v
-			}
-			DPrintf("server %d has %s key %s with value %s, queue %v", me, operation, key, res, (*unAppliedQueuePtr))
 		}
 
 		if kv.needSnapShot() {

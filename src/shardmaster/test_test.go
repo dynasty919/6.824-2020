@@ -1,12 +1,12 @@
 package shardmaster
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 )
 
 // import "time"
-import "fmt"
 
 func check(t *testing.T, groups []int, ck *Clerk) {
 	c := ck.Query(-1)
@@ -126,6 +126,7 @@ func TestBasic(t *testing.T) {
 		cfg.ShutdownServer(s)
 		for i := 0; i < len(cfa); i++ {
 			c := ck.Query(cfa[i].Num)
+			//		fmt.Println(i, c, cfa[i])
 			check_same_config(t, c, cfa[i])
 		}
 		cfg.StartServer(s)
@@ -378,3 +379,16 @@ func TestMulti(t *testing.T) {
 
 	fmt.Printf("  ... Passed\n")
 }
+
+//func TestRebalance(T *testing.T) {
+//	tests := []struct {
+//		a [NShards]int
+//		b []int
+//	}{
+//		{[NShards]int{0, 0, 0, 1, 1, 2, 0, 0, 0, 0}, []int{0, 2, 3}},
+//	}
+//
+//	for _, t := range tests {
+//		fmt.Println(rebalance(t.a, t.b))
+//	}
+//}
